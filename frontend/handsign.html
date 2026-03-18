@@ -1,0 +1,1797 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>温暖急诊 · 手语翻译官</title>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/holistic/holistic.js" crossorigin="anonymous"></script>
+    <style>
+        /* ============================================
+           温暖急诊 · 手语翻译官 - 温暖舒适风格
+        ============================================ */
+
+        :root {
+            --bg-warm: #FFF9F0;
+            --bg-card: #FFFFFF;
+            --primary-coral: #FF9F43;
+            --primary-coral-light: #FFE0C2;
+            --secondary-mint: #2ED573;
+            --secondary-mint-light: #D4F5E0;
+            --text-dark: #2F3542;
+            --text-medium: #57606F;
+            --text-light: #A4B0BE;
+            --border-soft: #E8E8E8;
+            --shadow-soft: 0 4px 20px rgba(0,0,0,0.06);
+            --danger-soft: #FF6B6B;
+            --danger-bg: #FFF0F0;
+            --accent-purple: #6C5CE7;
+            --accent-blue: #74B9FF;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'PingFang SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', sans-serif;
+            background: var(--bg-warm);
+            min-height: 100vh;
+            color: var(--text-dark);
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 24px;
+        }
+
+        header {
+            text-align: center;
+            padding: 20px 0;
+        }
+
+        h1 {
+            font-size: 2em;
+            color: var(--text-dark);
+            font-weight: 700;
+        }
+
+        .subtitle {
+            color: var(--text-medium);
+            margin-top: 6px;
+            font-size: 0.95em;
+        }
+
+        /* 欢迎提示框 */
+        .welcome-box {
+            background: linear-gradient(135deg, var(--primary-coral-light) 0%, #FFF5EB 100%);
+            border-radius: 20px;
+            padding: 20px 24px;
+            margin-bottom: 20px;
+            box-shadow: var(--shadow-soft);
+        }
+        .welcome-box .welcome-title {
+            color: var(--primary-coral);
+            font-weight: 600;
+            font-size: 1.05em;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .welcome-box .welcome-text {
+            color: var(--text-medium);
+            font-size: 0.9em;
+            line-height: 1.6;
+        }
+
+        /* 模式切换 */
+        .mode-switch {
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            margin: 20px 0;
+            flex-wrap: wrap;
+        }
+        .mode-btn {
+            padding: 12px 28px;
+            border: 2px solid var(--border-soft);
+            background: var(--bg-card);
+            color: var(--text-medium);
+            border-radius: 25px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-size: 0.95em;
+            font-weight: 500;
+            box-shadow: var(--shadow-soft);
+        }
+        .mode-btn:hover {
+            border-color: var(--primary-coral);
+            color: var(--primary-coral);
+        }
+        .mode-btn.active {
+            background: linear-gradient(135deg, var(--primary-coral) 0%, #FFAB5E 100%);
+            color: white;
+            border-color: transparent;
+            box-shadow: 0 4px 15px rgba(255,159,67,0.35);
+        }
+        .mode-btn.active.continuous-mode {
+            background: linear-gradient(135deg, var(--accent-purple), var(--accent-blue));
+        }
+        .mode-btn.active.upload-mode {
+            background: linear-gradient(135deg, #a29bfe, #6c5ce7);
+        }
+
+        .main-layout {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-top: 16px;
+        }
+        @media (max-width: 900px) {
+            .main-layout { grid-template-columns: 1fr; }
+        }
+
+        /* 卡片面板 */
+        .panel {
+            background: var(--bg-card);
+            border-radius: 20px;
+            padding: 24px;
+            box-shadow: var(--shadow-soft);
+        }
+        .panel h2 {
+            font-size: 1.1em;
+            margin-bottom: 16px;
+            color: var(--text-dark);
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        /* 视频容器 */
+        .video-container {
+            position: relative;
+            border-radius: 16px;
+            overflow: hidden;
+            background: #F8F9FA;
+            aspect-ratio: 4/3;
+            box-shadow: inset 0 2px 8px rgba(0,0,0,0.05);
+        }
+        #webcam, #canvas, #uploadVideo {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        #canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            pointer-events: none;
+        }
+
+        .overlay {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: rgba(255,255,255,0.95);
+            color: var(--text-dark);
+            padding: 8px 14px;
+            border-radius: 10px;
+            font-size: 0.85em;
+            z-index: 10;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            font-weight: 500;
+        }
+        .overlay.recording {
+            background: var(--danger-soft);
+            color: white;
+            animation: pulse 1s infinite;
+        }
+        .overlay.detecting {
+            background: var(--accent-purple);
+            color: white;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.85; transform: scale(1.02); }
+        }
+
+        /* 检测状态面板 */
+        .detection-status {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: rgba(255,255,255,0.95);
+            padding: 10px 14px;
+            border-radius: 12px;
+            font-size: 0.8em;
+            z-index: 10;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        .detection-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin: 4px 0;
+            color: var(--text-medium);
+        }
+        .detection-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #DDD;
+            transition: background 0.2s;
+        }
+        .detection-dot.active {
+            background: var(--secondary-mint);
+            box-shadow: 0 0 6px rgba(46,213,115,0.5);
+        }
+
+        /* 连续模式状态面板 */
+        .status-panel {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: rgba(0,0,0,0.7);
+            color: white;
+            padding: 10px 14px;
+            border-radius: 12px;
+            font-size: 0.8em;
+            z-index: 10;
+        }
+        .status-row {
+            display: flex;
+            justify-content: space-between;
+            gap: 14px;
+            margin: 3px 0;
+        }
+        .status-value { font-weight: 600; }
+
+        /* 速度指示器 */
+        .speed-indicator {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            right: 10px;
+            background: rgba(0,0,0,0.6);
+            border-radius: 8px;
+            padding: 10px;
+            z-index: 10;
+        }
+        .speed-bar-container {
+            height: 8px;
+            background: rgba(255,255,255,0.2);
+            border-radius: 4px;
+            overflow: hidden;
+            position: relative;
+        }
+        .speed-bar {
+            height: 100%;
+            background: var(--secondary-mint);
+            transition: width 0.05s;
+            border-radius: 4px;
+        }
+        .speed-bar.high { background: var(--danger-soft); }
+        .speed-bar.medium { background: var(--primary-coral); }
+        .threshold-line {
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            width: 2px;
+            background: white;
+        }
+        .speed-info {
+            display: flex;
+            justify-content: space-between;
+            color: white;
+            font-size: 0.75em;
+            margin-top: 5px;
+        }
+
+        .parallel-status {
+            position: absolute;
+            bottom: 55px;
+            right: 10px;
+            background: rgba(0,0,0,0.8);
+            color: white;
+            padding: 10px 14px;
+            border-radius: 12px;
+            font-size: 0.85em;
+            z-index: 10;
+            transition: all 0.3s ease;
+            min-width: 100px;
+        }
+        .parallel-status .status-row {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            margin: 4px 0;
+        }
+        .parallel-status .count {
+            font-weight: bold;
+            font-size: 1.2em;
+            min-width: 20px;
+            text-align: center;
+        }
+
+        /* 队列增加时的"可以继续"提示 */
+        .parallel-status.ready-next {
+            background: linear-gradient(135deg, #2ED573 0%, #26de81 100%);
+            animation: pulseGreen 0.5s ease 2;
+            box-shadow: 0 0 20px rgba(46, 213, 115, 0.6);
+        }
+        .parallel-status .next-hint {
+            display: none;
+            padding-top: 8px;
+            margin-top: 8px;
+            border-top: 1px solid rgba(255,255,255,0.3);
+            font-weight: 600;
+            text-align: center;
+            font-size: 0.95em;
+        }
+        .parallel-status.ready-next .next-hint {
+            display: block;
+            animation: fadeInUp 0.3s ease;
+        }
+
+        @keyframes pulseGreen {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+        }
+        @keyframes fadeInUp {
+            from { opacity: 0; transform: translateY(5px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* 上传区域 */
+        .upload-area {
+            border: 2px dashed var(--border-soft);
+            border-radius: 16px;
+            padding: 40px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            aspect-ratio: 4/3;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            background: #FAFAFA;
+        }
+        .upload-area:hover {
+            border-color: var(--primary-coral);
+            background: var(--primary-coral-light);
+        }
+        .upload-area.dragover {
+            border-color: var(--secondary-mint);
+            background: var(--secondary-mint-light);
+        }
+        .upload-area .icon {
+            font-size: 3em;
+            margin-bottom: 14px;
+        }
+        .upload-area p {
+            color: var(--text-medium);
+            font-size: 0.9em;
+        }
+        #fileInput { display: none; }
+
+        /* 设置面板 */
+        .settings-panel {
+            background: #FAFAFA;
+            border-radius: 14px;
+            padding: 16px;
+            margin-top: 14px;
+        }
+        .settings-panel h3 {
+            color: var(--text-dark);
+            font-size: 0.95em;
+            margin-bottom: 12px;
+            font-weight: 600;
+        }
+        .setting-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin: 10px 0;
+            font-size: 0.85em;
+        }
+        .setting-item label {
+            color: var(--text-medium);
+        }
+        .setting-item input[type="range"] {
+            width: 100px;
+            accent-color: var(--primary-coral);
+        }
+        .setting-value {
+            color: var(--primary-coral);
+            font-weight: 600;
+            min-width: 35px;
+            text-align: right;
+        }
+
+        /* 按钮样式 */
+        .controls {
+            display: flex;
+            gap: 10px;
+            margin-top: 14px;
+            flex-wrap: wrap;
+        }
+        button {
+            flex: 1;
+            padding: 14px;
+            font-size: 0.95em;
+            border: none;
+            border-radius: 12px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-weight: 600;
+            min-width: 120px;
+        }
+        .btn-primary {
+            background: linear-gradient(135deg, var(--primary-coral) 0%, #FFAB5E 100%);
+            color: white;
+            box-shadow: 0 4px 12px rgba(255,159,67,0.3);
+        }
+        .btn-primary:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 16px rgba(255,159,67,0.4);
+        }
+        .btn-primary:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        .btn-secondary {
+            background: #F0F0F0;
+            color: var(--text-medium);
+        }
+        .btn-secondary:hover {
+            background: #E8E8E8;
+        }
+        .btn-danger {
+            background: var(--danger-bg);
+            color: var(--danger-soft);
+        }
+        .btn-recording {
+            background: linear-gradient(135deg, #FF6B6B 0%, #FF8787 100%) !important;
+            color: white !important;
+        }
+        .btn-success {
+            background: linear-gradient(135deg, var(--secondary-mint) 0%, #4CD787 100%);
+            color: white;
+            box-shadow: 0 4px 12px rgba(46,213,115,0.3);
+        }
+        .btn-success:hover:not(:disabled) {
+            transform: translateY(-2px);
+        }
+        .btn-continuous {
+            background: linear-gradient(135deg, var(--accent-purple), var(--accent-blue));
+            color: white;
+        }
+
+        /* 状态栏 */
+        .status-bar {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-top: 12px;
+            padding: 12px 14px;
+            background: #FAFAFA;
+            border-radius: 10px;
+            font-size: 0.85em;
+            color: var(--text-medium);
+        }
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #DDD;
+        }
+        .status-dot.active {
+            background: var(--secondary-mint);
+        }
+
+        /* 进度条 */
+        .progress-bar {
+            height: 6px;
+            background: #F0F0F0;
+            border-radius: 3px;
+            margin-top: 10px;
+            overflow: hidden;
+            display: none;
+        }
+        .progress-bar.active { display: block; }
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, var(--primary-coral), var(--secondary-mint));
+            width: 0%;
+            transition: width 0.3s ease;
+            border-radius: 3px;
+        }
+
+        /* 识别结果显示 */
+        .current-word {
+            text-align: center;
+            padding: 30px;
+            background: linear-gradient(135deg, #FFF9F0 0%, #FFF5EB 100%);
+            border-radius: 16px;
+            margin-bottom: 16px;
+        }
+        .current-word .label {
+            font-size: 2.8em;
+            font-weight: bold;
+            color: var(--primary-coral);
+            transition: all 0.3s;
+        }
+        .current-word .label.success {
+            color: var(--secondary-mint);
+        }
+        .current-word .confidence {
+            color: var(--text-light);
+            margin-top: 8px;
+            font-size: 1em;
+        }
+
+        /* Top5候选词样式 */
+        .top-candidates {
+            margin: 16px 0;
+            padding: 20px;
+            background: linear-gradient(135deg, #FFF9F0 0%, #FFF5EB 100%);
+            border-radius: 16px;
+        }
+        .top-candidates h3 {
+            font-size: 1em;
+            color: var(--text-dark);
+            margin-bottom: 14px;
+            text-align: center;
+            font-weight: 500;
+        }
+        .candidates-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            justify-content: center;
+        }
+        .candidates-list .placeholder {
+            color: var(--text-light);
+            font-size: 0.9em;
+        }
+        .candidate-btn {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 14px 20px;
+            background: white;
+            border: 2px solid var(--border-soft);
+            border-radius: 14px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            min-width: 90px;
+            position: relative;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.04);
+        }
+        .candidate-btn:hover {
+            border-color: var(--primary-coral);
+            transform: translateY(-3px);
+            box-shadow: 0 6px 20px rgba(255,159,67,0.2);
+        }
+        .candidate-btn.top1 {
+            background: linear-gradient(135deg, var(--secondary-mint-light) 0%, #E8FBF0 100%);
+            border-color: var(--secondary-mint);
+            overflow: hidden;
+        }
+        .candidate-btn.top1::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            height: 100%;
+            width: 0%;
+            background: linear-gradient(90deg, rgba(255,159,67,0.2) 0%, rgba(255,171,94,0.35) 50%, rgba(255,159,67,0.2) 100%);
+            z-index: 0;
+            border-radius: 12px;
+        }
+        .candidate-btn.top1.counting-3s::before {
+            animation: fillProgress 3s linear forwards;
+        }
+        .candidate-btn.top1.counting-5s::before {
+            animation: fillProgress 5s linear forwards;
+        }
+        @keyframes fillProgress {
+            from { width: 0%; }
+            to { width: 100%; }
+        }
+        .candidate-btn.top1 > * {
+            position: relative;
+            z-index: 1;
+        }
+        .candidate-btn .label {
+            font-size: 1.3em;
+            font-weight: bold;
+            color: var(--text-dark);
+            margin-bottom: 4px;
+        }
+        .candidate-btn .conf {
+            font-size: 0.8em;
+            color: var(--text-light);
+        }
+        .candidate-btn .rank {
+            position: absolute;
+            top: -8px;
+            left: -8px;
+            width: 22px;
+            height: 22px;
+            background: var(--primary-coral);
+            color: white;
+            border-radius: 50%;
+            font-size: 0.75em;
+            font-weight: bold;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 2px 4px rgba(255,159,67,0.4);
+            z-index: 2;
+        }
+        .candidate-btn.top1 .rank {
+            background: var(--secondary-mint);
+        }
+
+        /* 自动确认倒计时提示 */
+        .auto-confirm-hint {
+            margin-top: 14px;
+            padding: 10px 14px;
+            background: rgba(255,159,67,0.1);
+            border-radius: 10px;
+            text-align: center;
+        }
+        .countdown-text {
+            font-size: 0.85em;
+            color: var(--text-medium);
+        }
+        .countdown-text #countdownNum {
+            font-weight: bold;
+            color: var(--primary-coral);
+            font-size: 1.1em;
+        }
+        .countdown-bar {
+            height: 3px;
+            background: var(--border-soft);
+            border-radius: 2px;
+            margin-top: 8px;
+            overflow: hidden;
+        }
+        .countdown-progress {
+            height: 100%;
+            background: linear-gradient(90deg, var(--primary-coral), var(--secondary-mint));
+            width: 100%;
+            transition: width 1s linear;
+        }
+
+        .manual-select-hint {
+            margin-top: 14px;
+            padding: 12px 16px;
+            background: linear-gradient(135deg, #FFF0F5 0%, #FFE8EE 100%);
+            border: 1px solid rgba(255,107,107,0.2);
+            border-radius: 10px;
+            text-align: center;
+            color: var(--text-medium);
+            font-size: 0.9em;
+        }
+
+        /* 实时结果流（连续模式） */
+        .result-stream {
+            margin-top: 16px;
+            padding: 16px;
+            background: linear-gradient(135deg, #F8F9FF 0%, #F0F4FF 100%);
+            border-radius: 14px;
+        }
+        .result-stream h3 {
+            font-size: 0.9em;
+            color: var(--text-dark);
+            margin-bottom: 10px;
+        }
+        .stream-items {
+            max-height: 180px;
+            overflow-y: auto;
+        }
+        .stream-item {
+            padding: 10px 12px;
+            background: white;
+            border-radius: 10px;
+            margin: 5px 0;
+            font-size: 0.85em;
+            cursor: pointer;
+            transition: all 0.2s;
+            border: 2px solid transparent;
+        }
+        .stream-item:hover { border-color: var(--accent-blue); }
+        .stream-item.expanded { border-color: var(--accent-purple); background: #F8F9FF; }
+        .stream-item.added { border-left: 3px solid var(--secondary-mint); }
+        .stream-item-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .stream-item .word { font-weight: 600; font-size: 1.05em; }
+        .stream-item .meta { color: var(--text-light); font-size: 0.8em; }
+        .stream-item-candidates {
+            display: none;
+            margin-top: 8px;
+            padding-top: 8px;
+            border-top: 1px solid var(--border-soft);
+        }
+        .stream-item.expanded .stream-item-candidates { display: block; }
+        .candidate-chip {
+            display: inline-block;
+            padding: 5px 12px;
+            margin: 3px;
+            background: var(--bg-warm);
+            border: 1px solid var(--border-soft);
+            border-radius: 14px;
+            cursor: pointer;
+            font-size: 0.85em;
+            transition: all 0.2s;
+        }
+        .candidate-chip:hover {
+            background: var(--primary-coral-light);
+            border-color: var(--primary-coral);
+        }
+        .candidate-chip.top1 {
+            background: var(--secondary-mint-light);
+            border-color: var(--secondary-mint);
+        }
+        .candidate-chip small { color: var(--text-light); margin-left: 3px; }
+
+        /* 词汇序列 */
+        .sequence-section { margin-top: 16px; overflow: visible; }
+        .sequence-section h3 {
+            font-size: 0.95em;
+            color: var(--text-dark);
+            margin-bottom: 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .word-sequence {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            min-height: 50px;
+            padding: 20px 14px 14px 14px; /* 增加顶部padding */
+            background: #FAFAFA;
+            border-radius: 14px;
+            overflow: visible; /* 确保不裁剪溢出内容 */
+        }
+        .word-tag {
+            position: relative; /* 关键：作为锚点 */
+            display: inline-flex;
+            align-items: center;
+            background: linear-gradient(135deg, var(--secondary-mint-light) 0%, #E8FBF0 100%);
+            border: 1px solid rgba(46,213,115,0.3);
+            color: var(--text-dark);
+            padding: 10px 18px; /* 左右 padding 一致，文字居中 */
+            border-radius: 12px; /*稍微方一点，配合右上角图标 */
+            font-size: 0.95em;
+            font-weight: 500;
+            cursor: grab;
+            user-select: none;
+            transition: all 0.2s;
+
+            /* 关键修改：增加外边距，防止右上角的叉叉遮挡其他元素 */
+            margin-right: 12px;
+            margin-top: 10px;
+
+            /* 关键修改：允许子元素溢出，否则叉叉会被切掉 */
+            overflow: visible;
+        }
+
+        .word-tag:active { cursor: grabbing; }
+        .word-tag.dragging { opacity: 0.5; transform: scale(0.95); }
+        .word-tag.drag-over { transform: translateX(4px); }
+
+        .word-tag .delete-btn {
+            position: absolute;
+            /* 定位到右上角 */
+            top: -8px;
+            right: -8px;
+            left: auto; /* 确保left不干扰 */
+
+            width: 20px;
+            height: 20px;
+            min-width: 20px;
+            border-radius: 50%;
+            background: #FF6B6B; /* 红色背景 */
+            color: white;        /* 白色叉叉 */
+            border: 2px solid #FFF; /* 白色描边，增加立体感 */
+
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;     /* 叉叉符号 */
+            font-weight: bold;
+            line-height: 1;
+            padding: 0;
+            flex: none;
+            opacity: 1;          /* 默认显示 */
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+            transition: all 0.2s ease;
+            z-index: 10;
+        }
+
+        /* 鼠标悬停在标签上时，叉叉稍微放大 */
+        .word-tag:hover .delete-btn {
+            transform: scale(1.15);
+        }
+
+        /* 鼠标悬停在叉叉上时，颜色加深 */
+        .word-tag .delete-btn:hover {
+            background: #FF4757;
+            transform: scale(1.2);
+        }
+        .placeholder { color: var(--text-light); font-size: 0.9em; }
+
+        /* 润色结果 */
+        .polished-result {
+            background: linear-gradient(135deg, var(--secondary-mint-light) 0%, #E8FBF0 100%);
+            padding: 20px;
+            border-radius: 16px;
+            margin-top: 16px;
+            box-shadow: var(--shadow-soft);
+        }
+        .polished-result h3 {
+            color: var(--secondary-mint);
+            margin-bottom: 10px;
+            font-size: 0.95em;
+            font-weight: 600;
+        }
+        .polished-text {
+            font-size: 1.15em;
+            line-height: 1.6;
+            color: var(--text-dark);
+        }
+
+        /* 分诊结果 */
+        .triage-result {
+            background: var(--bg-card);
+            border-radius: 16px;
+            padding: 20px;
+            margin-top: 16px;
+            box-shadow: var(--shadow-soft);
+            border-left: 5px solid #DDD;
+        }
+        .triage-result.level-1 { border-left-color: #FF4757; background: linear-gradient(135deg, #FFF0F0 0%, #FFFFFF 100%); }
+        .triage-result.level-2 { border-left-color: #FF9F43; background: linear-gradient(135deg, #FFF8F0 0%, #FFFFFF 100%); }
+        .triage-result.level-3 { border-left-color: #FECA57; background: linear-gradient(135deg, #FFFBF0 0%, #FFFFFF 100%); }
+        .triage-result.level-4 { border-left-color: #2ED573; background: linear-gradient(135deg, #F0FFF5 0%, #FFFFFF 100%); }
+        .triage-header {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            margin-bottom: 14px;
+        }
+        .triage-badge {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            width: 70px;
+            height: 70px;
+            border-radius: 14px;
+            color: white;
+            font-weight: 700;
+        }
+        .triage-badge.level-1 { background: linear-gradient(135deg, #FF4757 0%, #FF6B7A 100%); }
+        .triage-badge.level-2 { background: linear-gradient(135deg, #FF9F43 0%, #FFB366 100%); }
+        .triage-badge.level-3 { background: linear-gradient(135deg, #FECA57 0%, #FFD97A 100%); }
+        .triage-badge.level-4 { background: linear-gradient(135deg, #2ED573 0%, #54E08C 100%); }
+        .triage-badge .level-num { font-size: 1.8em; line-height: 1; }
+        .triage-badge .level-text { font-size: 0.8em; margin-top: 3px; }
+        .triage-info { flex: 1; }
+        .triage-department {
+            font-size: 1.25em;
+            font-weight: 700;
+            color: var(--text-dark);
+            margin-bottom: 6px;
+        }
+        .triage-reason { color: var(--text-medium); font-size: 0.9em; line-height: 1.5; }
+        .triage-advice {
+            background: #FAFAFA;
+            border-radius: 10px;
+            padding: 12px 14px;
+            margin-top: 12px;
+            font-size: 0.85em;
+            color: var(--text-medium);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        /* 提示框 */
+        .tips-box {
+            background: #FFFBF0;
+            border: 1px solid #FFE5B4;
+            border-radius: 14px;
+            padding: 14px 18px;
+            margin-top: 14px;
+            font-size: 0.85em;
+        }
+        .tips-box strong { color: var(--primary-coral); font-weight: 600; }
+        .tips-box ul { margin: 10px 0 0 18px; color: var(--text-medium); }
+        .tips-box li { margin: 6px 0; line-height: 1.4; }
+
+        /* 日志 */
+        .log-container {
+            max-height: 80px;
+            overflow-y: auto;
+            background: #2F3542;
+            border-radius: 8px;
+            padding: 10px;
+            margin-top: 12px;
+            font-family: monospace;
+            font-size: 0.7em;
+        }
+        .log-entry { color: #A4B0BE; margin: 2px 0; }
+        .log-entry.success { color: var(--secondary-mint); }
+        .log-entry.info { color: var(--accent-blue); }
+        .log-entry.warning { color: var(--primary-coral); }
+        .log-entry.action { color: #DFE6E9; font-weight: bold; }
+
+        .hidden { display: none !important; }
+        .hint { font-size: 0.8em; color: var(--text-light); margin-top: 6px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🤟 温暖急诊 · 手语翻译官</h1>
+            <p class="subtitle">让沟通无障碍，让关怀更温暖</p>
+        </header>
+
+        <div class="welcome-box">
+            <div class="welcome-title">💝 欢迎使用</div>
+            <div class="welcome-text">
+                您好！我是您的手语翻译助手。请放心比划，我会尽力理解您想表达的内容。<br>
+                如果识别有误，您可以从候选词中选择正确的表达，我会不断学习进步。
+            </div>
+        </div>
+
+        <!-- 模式切换：三个模式 -->
+        <div class="mode-switch">
+            <button class="mode-btn active" id="tabIsolated" onclick="switchMode('isolated')">📌 孤立词识别</button>
+            <button class="mode-btn" id="tabContinuous" onclick="switchMode('continuous')">🔄 连续识别</button>
+            <button class="mode-btn" id="tabUpload" onclick="switchMode('upload')">📁 上传视频</button>
+        </div>
+
+        <div class="main-layout">
+            <!-- 左侧：输入区 -->
+            <div class="panel">
+                <!-- ============ 孤立词/连续模式：摄像头区域 ============ -->
+                <div id="cameraSection">
+                    <h2><span class="icon">📹</span> 请对着摄像头比划</h2>
+
+                    <div class="video-container">
+                        <video id="webcam" autoplay playsinline></video>
+                        <canvas id="canvas"></canvas>
+                        <div class="overlay" id="overlay">等待开始...</div>
+
+                        <!-- 孤立词模式：检测状态 -->
+                        <div class="detection-status" id="detectionStatus">
+                            <div class="detection-item">
+                                <div class="detection-dot" id="poseDot"></div>
+                                <span>身体</span>
+                            </div>
+                            <div class="detection-item">
+                                <div class="detection-dot" id="leftHandDot"></div>
+                                <span>左手</span>
+                            </div>
+                            <div class="detection-item">
+                                <div class="detection-dot" id="rightHandDot"></div>
+                                <span>右手</span>
+                            </div>
+                        </div>
+
+                        <!-- 连续模式：状态面板 -->
+                        <div class="status-panel hidden" id="statusPanel">
+                            <div class="status-row"><span>检测</span><span class="status-value" id="detectState">-</span></div>
+                            <div class="status-row"><span>帧数</span><span class="status-value" id="frameValue">0</span></div>
+                            <div class="status-row"><span>FPS</span><span class="status-value" id="fpsValue">-</span></div>
+                        </div>
+
+                        <div class="parallel-status hidden" id="parallelStatus">
+                            <div class="status-row">🔍 检测中</div>
+                            <div class="status-row">⏳ 队列: <span class="count" id="queueCount">0</span></div>
+                            <div class="next-hint">✅ 请继续下一个</div>
+                        </div>
+
+                        <div class="speed-indicator hidden" id="speedIndicator">
+                            <div class="speed-bar-container">
+                                <div class="speed-bar" id="speedBar" style="width: 0%"></div>
+                                <div class="threshold-line" id="startLine" style="left: 30%"></div>
+                                <div class="threshold-line" id="stopLine" style="left: 15%"></div>
+                            </div>
+                            <div class="speed-info">
+                                <span>速度: <span id="speedValue">0.000</span></span>
+                                <span id="actionInfo">等待动作</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 孤立词模式控制 -->
+                    <div class="controls" id="isolatedControls">
+                        <button id="startBtn" class="btn-primary" onclick="startCamera()">📷 开启摄像头</button>
+                        <button id="recordBtn" class="btn-success" onclick="toggleRecording()" disabled>⏺ 开始识别</button>
+                    </div>
+
+                    <!-- 连续模式控制 -->
+                    <div class="controls hidden" id="continuousControls">
+                        <button id="startBtn2" class="btn-primary" onclick="startCamera()">📷 开启摄像头</button>
+                        <button id="continuousBtn" class="btn-continuous" onclick="toggleContinuous()" disabled>🔄 开始连续识别</button>
+                    </div>
+
+                    <div class="status-bar" id="cameraStatusBar">
+                        <div class="status-dot" id="statusDot"></div>
+                        <span id="statusText">请先开启摄像头 📷</span>
+                    </div>
+
+                    <!-- 提示（孤立词模式） -->
+                    <div class="tips-box" id="tipsBox">
+                        <strong>💡 小贴士：</strong>
+                        <ul>
+                            <li>找一个光线充足的地方</li>
+                            <li>手部在胸前比划，效果最好</li>
+                            <li>动作可以稍微慢一点</li>
+                        </ul>
+                    </div>
+
+                    <div class="log-container hidden" id="logContainer">
+                        <div class="log-entry">等待启动...</div>
+                    </div>
+                </div>
+
+                <!-- ============ 上传模式：上传区域 ============ -->
+                <div id="uploadSection" class="hidden">
+                    <h2><span class="icon">📁</span> 上传手语视频</h2>
+
+                    <div class="upload-area" id="uploadArea" onclick="document.getElementById('fileInput').click()">
+                        <div class="icon">📤</div>
+                        <p>点击选择或拖拽视频文件</p>
+                        <p style="font-size: 0.8em; margin-top: 10px; color: var(--text-light);">支持 MP4, AVI, MOV, WebM</p>
+                    </div>
+                    <input type="file" id="fileInput" accept="video/*" onchange="handleFileSelect(event)">
+
+                    <div class="video-container hidden" id="videoPreviewContainer">
+                        <video id="uploadVideo" controls></video>
+                    </div>
+
+                    <div class="controls">
+                        <button id="uploadBtn" class="btn-primary" onclick="uploadVideo()" disabled>🔍 开始识别</button>
+                        <button id="clearFileBtn" class="btn-secondary hidden" onclick="clearFile()">✕ 清除</button>
+                    </div>
+
+                    <div class="progress-bar" id="progressBar">
+                        <div class="progress-fill" id="progressFill"></div>
+                    </div>
+
+                    <div class="status-bar">
+                        <div class="status-dot" id="uploadStatusDot"></div>
+                        <span id="uploadStatusText">请选择一个视频文件</span>
+                    </div>
+                </div>
+
+                <div class="controls" style="margin-top: 14px;">
+                    <button class="btn-secondary" onclick="clearAll()">🗑 清空重来</button>
+                </div>
+            </div>
+
+            <!-- 右侧：结果 -->
+            <div class="panel">
+                <h2><span class="icon">💬</span> 我理解您说的是</h2>
+                <div class="current-word">
+                    <div class="label" id="currentWord">-</div>
+                    <div class="confidence" id="confidence">-</div>
+                </div>
+
+                <!-- 孤立词/上传模式：Top5候选词 -->
+                <div class="top-candidates" id="topCandidates">
+                    <h3>🤔 您想表达的是这个意思吗？</h3>
+                    <div class="candidates-list" id="candidatesList">
+                        <span class="placeholder">识别后会显示候选词供您选择</span>
+                    </div>
+                    <div class="auto-confirm-hint hidden" id="autoConfirmHint">
+                        <span class="countdown-text">若不选择，<span id="countdownNum">5</span>秒后自动确认</span>
+                        <div class="countdown-bar"><div class="countdown-progress" id="countdownProgress"></div></div>
+                    </div>
+                    <div class="manual-select-hint hidden" id="manualSelectHint">
+                        <span>🙏 不太确定，请帮我选择正确的词</span>
+                    </div>
+                </div>
+
+                <!-- 连续模式：实时结果流 -->
+                <div class="result-stream hidden" id="resultStream">
+                    <h3>📊 实时识别流 <small style="font-weight:normal;color:var(--text-light)">（点击展开候选词）</small></h3>
+                    <div class="stream-items" id="streamItems"></div>
+                </div>
+
+                <!-- 序列区域 -->
+                <div class="sequence-section">
+                    <h3>
+                        📝 已确认的表达
+                        <button class="btn-secondary" style="padding: 5px 10px; font-size: 0.75em; flex: none;" onclick="clearSequence()">清空</button>
+                    </h3>
+                    <div class="word-sequence" id="wordSequence">
+                        <span class="placeholder">点击上方候选词确认</span>
+                    </div>
+                    <div class="hint">💡 拖拽调整顺序，点击 × 删除</div>
+                </div>
+
+                <div class="controls" style="margin-top: 16px;">
+                    <button class="btn-success" onclick="polishSequence()">✨ 生成完整句子</button>
+                    <button class="btn-danger" onclick="clearSequence()">🗑 重新开始</button>
+                </div>
+
+                <div class="polished-result hidden" id="polishedResult">
+                    <h3>💝 您想说的是：</h3>
+                    <p class="polished-text" id="polishedText"></p>
+                </div>
+
+                <!-- 分诊结果 -->
+                <div class="triage-result hidden" id="triageResult">
+                    <div class="triage-header">
+                        <div class="triage-badge" id="triageBadge">
+                            <span class="level-num" id="triageLevel">-</span>
+                            <span class="level-text" id="triageLevelText">级</span>
+                        </div>
+                        <div class="triage-info">
+                            <div class="triage-department">🏥 <span id="triageDepartment">-</span></div>
+                            <div class="triage-reason" id="triageReason">-</div>
+                        </div>
+                    </div>
+                    <div class="triage-advice">💡 <span id="triageAdvice">-</span></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ==================== 获取患者ID ====================
+        const urlParams = new URLSearchParams(window.location.search);
+        const patientId = urlParams.get('patientId') || 'unknown';
+
+        const API_URL = 'http://localhost:5000';
+
+        // ==================== 全局状态 ====================
+        let webcam, canvas, ctx, camera, holistic;
+        let cameraStarted = false;
+        let currentMode = 'isolated';
+
+        // 孤立词模式
+        let isRecording = false;
+        let framesBuffer = [];
+        let frameCountLocal = 0;
+        let lastCaptureTime = 0;
+
+        // 滑动窗口投票
+        let predictionBuffer = [];
+        const BUFFER_SIZE = 3;
+        let lastDisplayedPrediction = null;
+
+        // 自动确认
+        let autoConfirmTimer = null;
+        let countdownTimer = null;
+        const HIGH_CONFIDENCE = 0.85;
+        const MID_CONFIDENCE = 0.50;
+        const HIGH_CONF_DELAY = 3000;
+        const MID_CONF_DELAY = 5000;
+        let lastTopPredictions = [];
+
+        // 连续模式
+        let continuousRunning = false;
+        let detectState = 'IDLE';
+        let actionFrames = [];
+        let stoppingCount = 0;
+        let processingCount = 0;
+        let prevWrist = null;
+        let speedHistory = [];
+        let currentSpeed = 0;
+        let fpsCount = 0;
+        let lastFpsTime = Date.now();
+
+        // 结果
+        let wordSequence = [];
+        let resultHistory = [];
+        let draggedIndex = null;
+
+        // 上传模式
+        let selectedFile = null;
+
+        // 设置
+        let isolatedSettings = { modelComplexity: 1, smoothLandmarks: true, minDetectionConfidence: 0.3, minTrackingConfidence: 0.3 };
+        let continuousParams = { startThreshold: 0.02, stopThreshold: 0.01, stopFrames: 5, minFrames: 10, maxFrames: 100, confThreshold: 0.5 };
+
+        const POSE_CONNECTIONS = [[0,1],[1,2],[2,3],[3,7],[0,4],[4,5],[5,6],[6,8],[9,10],[11,12],[11,13],[13,15],[12,14],[14,16],[11,23],[12,24],[23,24]];
+        const HAND_CONNECTIONS = [[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[0,9],[9,10],[10,11],[11,12],[0,13],[13,14],[14,15],[15,16],[0,17],[17,18],[18,19],[19,20],[5,9],[9,13],[13,17]];
+
+        // ==================== 模式切换 ====================
+        function switchMode(mode) {
+            currentMode = mode;
+
+            document.getElementById('tabIsolated').classList.toggle('active', mode === 'isolated');
+            document.getElementById('tabContinuous').classList.toggle('active', mode === 'continuous');
+            document.getElementById('tabContinuous').classList.toggle('continuous-mode', mode === 'continuous');
+            document.getElementById('tabUpload').classList.toggle('active', mode === 'upload');
+            document.getElementById('tabUpload').classList.toggle('upload-mode', mode === 'upload');
+
+            // 显示/隐藏区域
+            document.getElementById('cameraSection').classList.toggle('hidden', mode === 'upload');
+            document.getElementById('uploadSection').classList.toggle('hidden', mode !== 'upload');
+
+            document.getElementById('isolatedControls').classList.toggle('hidden', mode !== 'isolated');
+            document.getElementById('continuousControls').classList.toggle('hidden', mode !== 'continuous');
+            document.getElementById('tipsBox').classList.toggle('hidden', mode !== 'isolated');
+            document.getElementById('logContainer').classList.toggle('hidden', mode !== 'continuous');
+
+            document.getElementById('detectionStatus').classList.toggle('hidden', mode !== 'isolated');
+            document.getElementById('statusPanel').classList.toggle('hidden', mode !== 'continuous');
+            document.getElementById('speedIndicator').classList.toggle('hidden', mode !== 'continuous');
+            document.getElementById('parallelStatus').classList.toggle('hidden', mode !== 'continuous');
+
+            document.getElementById('topCandidates').classList.toggle('hidden', mode === 'continuous');
+            document.getElementById('resultStream').classList.toggle('hidden', mode !== 'continuous');
+
+            if (isRecording) { isRecording = false; document.getElementById('recordBtn').textContent = '⏺ 开始识别'; document.getElementById('recordBtn').classList.remove('btn-recording'); }
+            if (continuousRunning) stopContinuous();
+            clearAutoConfirmTimers();
+
+            addLog(`切换到${mode === 'isolated' ? '孤立词' : mode === 'continuous' ? '连续识别' : '视频上传'}模式`, 'info');
+        }
+
+        // ==================== 摄像头初始化 ====================
+        function initHolistic() {
+            holistic = new Holistic({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/holistic/${file}` });
+            holistic.setOptions({ modelComplexity: isolatedSettings.modelComplexity, smoothLandmarks: isolatedSettings.smoothLandmarks, minDetectionConfidence: isolatedSettings.minDetectionConfidence, minTrackingConfidence: isolatedSettings.minTrackingConfidence, refineFaceLandmarks: false });
+            holistic.onResults(onHolisticResults);
+        }
+
+        async function startCamera() {
+            if (cameraStarted) return;
+            try {
+                webcam = document.getElementById('webcam');
+                canvas = document.getElementById('canvas');
+                ctx = canvas.getContext('2d');
+                initHolistic();
+                camera = new Camera(webcam, { onFrame: async () => { await holistic.send({image: webcam}); }, width: 640, height: 480 });
+                await camera.start();
+                cameraStarted = true;
+                setTimeout(() => {
+                    document.getElementById('startBtn').disabled = true;
+                    document.getElementById('startBtn').textContent = '✓ 已开启';
+                    document.getElementById('startBtn2').disabled = true;
+                    document.getElementById('startBtn2').textContent = '✓ 已开启';
+                    document.getElementById('recordBtn').disabled = false;
+                    document.getElementById('continuousBtn').disabled = false;
+                    document.getElementById('statusDot').classList.add('active');
+                    document.getElementById('statusText').textContent = '就绪，可以开始比划了';
+                    document.getElementById('overlay').textContent = '准备就绪';
+                    addLog('摄像头已启动', 'success');
+                }, 1000);
+            } catch (error) {
+                alert('摄像头启动失败: ' + error.message);
+            }
+        }
+
+        function onHolisticResults(results) {
+            canvas.width = webcam.videoWidth; canvas.height = webcam.videoHeight;
+            ctx.save(); ctx.clearRect(0, 0, canvas.width, canvas.height); ctx.drawImage(results.image, 0, 0);
+
+            const hasPose = !!results.poseLandmarks;
+            const hasLeftHand = !!results.leftHandLandmarks;
+            const hasRightHand = !!results.rightHandLandmarks;
+
+            if (currentMode === 'isolated') {
+                document.getElementById('poseDot').classList.toggle('active', hasPose);
+                document.getElementById('leftHandDot').classList.toggle('active', hasLeftHand);
+                document.getElementById('rightHandDot').classList.toggle('active', hasRightHand);
+            }
+
+            if (results.poseLandmarks) drawConnectors(ctx, results.poseLandmarks, POSE_CONNECTIONS, {color: '#00FF8866', lineWidth: 2});
+            if (results.leftHandLandmarks) { drawConnectors(ctx, results.leftHandLandmarks, HAND_CONNECTIONS, {color: '#FF6B6B', lineWidth: 3}); drawLandmarks(ctx, results.leftHandLandmarks, {color: '#FF6B6B', radius: 3}); }
+            if (results.rightHandLandmarks) { drawConnectors(ctx, results.rightHandLandmarks, HAND_CONNECTIONS, {color: '#4ECDC4', lineWidth: 3}); drawLandmarks(ctx, results.rightHandLandmarks, {color: '#4ECDC4', radius: 3}); }
+            ctx.restore();
+
+            calculateSpeed(results);
+            fpsCount++; const now = Date.now(); if (now - lastFpsTime >= 1000) { document.getElementById('fpsValue').textContent = fpsCount; fpsCount = 0; lastFpsTime = now; }
+
+            if (currentMode === 'isolated' && isRecording) captureRawFrame();
+            else if (currentMode === 'continuous' && continuousRunning) processDetection();
+        }
+
+        // ==================== 孤立词模式 ====================
+        function captureRawFrame() {
+            const now = Date.now(); if (now - lastCaptureTime < 33) return; lastCaptureTime = now;
+            const tempCanvas = document.createElement('canvas'); tempCanvas.width = webcam.videoWidth; tempCanvas.height = webcam.videoHeight;
+            tempCanvas.getContext('2d').drawImage(webcam, 0, 0);
+            framesBuffer.push(tempCanvas.toDataURL('image/jpeg', 0.8).split(',')[1]);
+            frameCountLocal++;
+            document.getElementById('statusText').textContent = `正在看... ${frameCountLocal}帧`;
+            document.getElementById('overlay').textContent = `录制: ${frameCountLocal}帧`;
+            document.getElementById('overlay').classList.add('recording');
+        }
+
+        function toggleRecording() {
+            const btn = document.getElementById('recordBtn');
+            if (!isRecording) {
+                isRecording = true; framesBuffer = []; frameCountLocal = 0; lastCaptureTime = 0;
+                btn.textContent = '⏹ 停止'; btn.classList.add('btn-recording');
+                document.getElementById('statusText').textContent = '我在看着，请比划...';
+                clearCandidates(); clearPredictionBuffer();
+            } else {
+                isRecording = false;
+                btn.textContent = '⏺ 开始识别'; btn.classList.remove('btn-recording');
+                document.getElementById('overlay').classList.remove('recording');
+                document.getElementById('statusText').textContent = `正在理解... (${framesBuffer.length}帧)`;
+                document.getElementById('overlay').textContent = `处理 ${framesBuffer.length} 帧...`;
+                sendFramesToBackend();
+            }
+        }
+
+        async function sendFramesToBackend() {
+            if (framesBuffer.length < 5) { document.getElementById('statusText').textContent = '时间有点短，请再比划一次 😊'; return; }
+            const wordEl = document.getElementById('currentWord'), confEl = document.getElementById('confidence');
+            wordEl.textContent = '请稍后...'; confEl.textContent = '正在识别中'; wordEl.style.color = 'var(--text-light)';
+            clearCandidates(); clearPredictionBuffer();
+
+            try {
+                const response = await fetch(`${API_URL}/recognize`, {
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ frames: framesBuffer, confidence_threshold: 0.3, auto_add: false, trim_frames: 2 })
+                });
+                const result = await response.json();
+                wordEl.style.color = '';
+
+                if (result.success) {
+                    displayResult(result.prediction, result.confidence);
+                    document.getElementById('statusText').textContent = result.confidence >= 0.5 ? `看起来像是「${result.prediction}」，请确认 👇` : '不太确定，请帮我选择 👇';
+                    document.getElementById('overlay').textContent = result.prediction;
+                    if (result.top_predictions && result.top_predictions.length > 0) displayTopCandidates(result.top_predictions);
+                } else {
+                    document.getElementById('statusText').textContent = '抱歉，没能理解，请再试一次 😊';
+                    wordEl.textContent = '-'; confEl.textContent = '-';
+                }
+            } catch (error) {
+                document.getElementById('statusText').textContent = '连接出了点问题'; wordEl.textContent = '-'; confEl.textContent = '-'; wordEl.style.color = '';
+            }
+        }
+
+        // ==================== 视频上传模式 ====================
+        function handleFileSelect(event) { const file = event.target.files[0]; if (file) handleFile(file); }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            const uploadArea = document.getElementById('uploadArea');
+            uploadArea.addEventListener('dragover', (e) => { e.preventDefault(); uploadArea.classList.add('dragover'); });
+            uploadArea.addEventListener('dragleave', () => { uploadArea.classList.remove('dragover'); });
+            uploadArea.addEventListener('drop', (e) => { e.preventDefault(); uploadArea.classList.remove('dragover'); const file = e.dataTransfer.files[0]; if (file && file.type.startsWith('video/')) handleFile(file); });
+            updateIsolatedSettings();
+        });
+
+        function handleFile(file) {
+            if (!file.type.startsWith('video/')) { alert('请选择视频文件'); return; }
+            selectedFile = file;
+            document.getElementById('uploadVideo').src = URL.createObjectURL(file);
+            document.getElementById('videoPreviewContainer').classList.remove('hidden');
+            document.getElementById('uploadArea').classList.add('hidden');
+            document.getElementById('uploadBtn').disabled = false;
+            document.getElementById('clearFileBtn').classList.remove('hidden');
+            document.getElementById('uploadStatusDot').classList.add('active');
+            document.getElementById('uploadStatusText').textContent = `已选择: ${file.name} ✓`;
+        }
+
+        function clearFile() {
+            selectedFile = null;
+            document.getElementById('fileInput').value = '';
+            document.getElementById('uploadVideo').src = '';
+            document.getElementById('videoPreviewContainer').classList.add('hidden');
+            document.getElementById('uploadArea').classList.remove('hidden');
+            document.getElementById('uploadBtn').disabled = true;
+            document.getElementById('clearFileBtn').classList.add('hidden');
+            document.getElementById('uploadStatusDot').classList.remove('active');
+            document.getElementById('uploadStatusText').textContent = '请选择一个视频文件';
+            document.getElementById('progressBar').classList.remove('active');
+        }
+
+        async function uploadVideo() {
+            if (!selectedFile) return;
+            const progressBar = document.getElementById('progressBar'), progressFill = document.getElementById('progressFill');
+            const wordEl = document.getElementById('currentWord'), confEl = document.getElementById('confidence');
+            wordEl.textContent = '请稍后...'; confEl.textContent = '正在识别中'; wordEl.style.color = 'var(--text-light)';
+            clearCandidates(); clearPredictionBuffer();
+            progressBar.classList.add('active'); progressFill.style.width = '30%';
+            document.getElementById('uploadStatusText').textContent = '正在上传...';
+            document.getElementById('uploadBtn').disabled = true;
+
+            try {
+                const formData = new FormData(); formData.append('file', selectedFile);
+                progressFill.style.width = '60%';
+                document.getElementById('uploadStatusText').textContent = '正在分析视频内容...';
+
+                const response = await fetch(`${API_URL}/upload_video`, { method: 'POST', body: formData });
+                progressFill.style.width = '100%';
+                const result = await response.json();
+                wordEl.style.color = '';
+
+                if (result.success) {
+                    displayResult(result.prediction, result.confidence);
+                    document.getElementById('uploadStatusText').textContent = `看起来像是「${result.prediction}」，请确认 👇`;
+                    if (result.top_predictions && result.top_predictions.length > 0) displayTopCandidates(result.top_predictions);
+                } else {
+                    document.getElementById('uploadStatusText').textContent = '抱歉，没能理解这个视频';
+                    wordEl.textContent = '-'; confEl.textContent = '-';
+                }
+            } catch (error) {
+                document.getElementById('uploadStatusText').textContent = '连接出了点问题';
+                wordEl.textContent = '-'; confEl.textContent = '-'; wordEl.style.color = '';
+            }
+            document.getElementById('uploadBtn').disabled = false;
+            setTimeout(() => { progressBar.classList.remove('active'); progressFill.style.width = '0%'; }, 1000);
+        }
+
+        // ==================== 候选词显示和自动确认 ====================
+        function displayTopCandidates(topPredictions) {
+            const list = document.getElementById('candidatesList');
+            clearAutoConfirmTimers();
+            if (!topPredictions || topPredictions.length === 0) { list.innerHTML = '<span class="placeholder">暂无候选词</span>'; hideAutoConfirmHint(); return; }
+            lastTopPredictions = topPredictions;
+            const top1Confidence = topPredictions[0].confidence;
+            list.innerHTML = '';
+
+            topPredictions.forEach((pred, index) => {
+                const btn = document.createElement('div');
+                btn.className = 'candidate-btn' + (index === 0 ? ' top1' : '');
+                btn.id = index === 0 ? 'top1Btn' : '';
+                btn.innerHTML = `<span class="rank">${pred.rank}</span><span class="label">${pred.label}</span><span class="conf">匹配 ${(pred.confidence * 100).toFixed(0)}%</span>`;
+                btn.onclick = () => confirmCandidate(pred.label, index);
+                list.appendChild(btn);
+            });
+            startAutoConfirmCountdown(topPredictions[0].label, top1Confidence);
+        }
+
+        function startAutoConfirmCountdown(defaultLabel, confidence) {
+            const hintEl = document.getElementById('autoConfirmHint'), manualHintEl = document.getElementById('manualSelectHint');
+            const progressEl = document.getElementById('countdownProgress'), top1Btn = document.getElementById('top1Btn');
+            hintEl.classList.add('hidden'); manualHintEl.classList.add('hidden');
+
+            let delayMs = 0, animationClass = '';
+            if (confidence >= HIGH_CONFIDENCE) { delayMs = HIGH_CONF_DELAY; animationClass = 'counting-3s'; }
+            else if (confidence >= MID_CONFIDENCE) { delayMs = MID_CONF_DELAY; animationClass = 'counting-5s'; }
+            else { manualHintEl.classList.remove('hidden'); if (top1Btn) top1Btn.classList.remove('counting-3s', 'counting-5s'); return; }
+
+            let countdownSeconds = Math.ceil(delayMs / 1000);
+            const totalSeconds = countdownSeconds;
+            document.querySelector('.countdown-text').innerHTML = `<span id="countdownNum">${countdownSeconds}</span>秒后自动确认`;
+            hintEl.classList.remove('hidden'); progressEl.style.transition = 'none'; progressEl.style.width = '100%';
+            if (top1Btn) { top1Btn.classList.remove('counting-3s', 'counting-5s'); void top1Btn.offsetWidth; top1Btn.classList.add(animationClass); }
+
+            countdownTimer = setInterval(() => {
+                countdownSeconds--;
+                const numEl = document.getElementById('countdownNum'); if (numEl) numEl.textContent = countdownSeconds;
+                progressEl.style.transition = 'width 1s linear'; progressEl.style.width = (countdownSeconds / totalSeconds * 100) + '%';
+                if (countdownSeconds <= 0) clearInterval(countdownTimer);
+            }, 1000);
+            autoConfirmTimer = setTimeout(() => confirmCandidate(defaultLabel, 0, true), delayMs);
+        }
+
+        function clearAutoConfirmTimers() {
+            if (autoConfirmTimer) { clearTimeout(autoConfirmTimer); autoConfirmTimer = null; }
+            if (countdownTimer) { clearInterval(countdownTimer); countdownTimer = null; }
+            const top1Btn = document.getElementById('top1Btn'); if (top1Btn) top1Btn.classList.remove('counting-3s', 'counting-5s');
+        }
+
+        function hideAutoConfirmHint() {
+            document.getElementById('autoConfirmHint')?.classList.add('hidden');
+            document.getElementById('manualSelectHint')?.classList.add('hidden');
+            const top1Btn = document.getElementById('top1Btn'); if (top1Btn) top1Btn.classList.remove('counting-3s', 'counting-5s');
+        }
+
+        async function confirmCandidate(label, index, isAuto = false) {
+            clearAutoConfirmTimers(); hideAutoConfirmHint();
+            try {
+                const response = await fetch(`${API_URL}/confirm_word`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ label }) });
+                const result = await response.json();
+                if (result.success) {
+                    wordSequence = result.sequence; updateSequenceDisplay();
+                    window.parent.postMessage({ type: 'wordConfirmed', word: label }, '*');
+                    const wordEl = document.getElementById('currentWord'), confEl = document.getElementById('confidence');
+                    wordEl.textContent = label; confEl.textContent = '已确认 ✓';
+                    wordEl.style.color = 'var(--secondary-mint)'; wordEl.style.transform = 'scale(1.1)';
+                    setTimeout(() => { wordEl.style.color = ''; wordEl.style.transform = ''; }, 300);
+                    clearCandidates(); clearPredictionBuffer();
+                    document.getElementById('statusText').textContent = isAuto ? `✓ 已自动确认「${label}」` : `✓ 好的，已记录「${label}」`;
+                }
+            } catch (error) { alert('操作失败，请再试一次'); }
+        }
+
+        function clearCandidates() { clearAutoConfirmTimers(); hideAutoConfirmHint(); document.getElementById('candidatesList').innerHTML = '<span class="placeholder">识别后会显示候选词供您选择</span>'; lastTopPredictions = []; }
+        function clearPredictionBuffer() { predictionBuffer = []; lastDisplayedPrediction = null; }
+
+        // ==================== 连续模式 ====================
+        function calculateSpeed(results) {
+            let wrist = null;
+            if (results.rightHandLandmarks) wrist = results.rightHandLandmarks[0];
+            else if (results.leftHandLandmarks) wrist = results.leftHandLandmarks[0];
+            else if (results.poseLandmarks) wrist = results.poseLandmarks[16];
+            if (wrist && prevWrist) { currentSpeed = Math.sqrt((wrist.x - prevWrist.x)**2 + (wrist.y - prevWrist.y)**2); } else { currentSpeed = 0; }
+            if (wrist) prevWrist = {x: wrist.x, y: wrist.y};
+            speedHistory.push(currentSpeed); if (speedHistory.length > 5) speedHistory.shift();
+            if (currentMode === 'continuous') updateSpeedDisplay();
+        }
+
+        function getSmoothedSpeed() { return speedHistory.length < 2 ? currentSpeed : speedHistory.slice(-3).reduce((a, b) => a + b, 0) / Math.min(3, speedHistory.length); }
+
+        function updateSpeedDisplay() {
+            const speed = getSmoothedSpeed(), maxDisplay = 0.06, percent = Math.min(100, (speed / maxDisplay) * 100);
+            const bar = document.getElementById('speedBar'); bar.style.width = percent + '%';
+            bar.className = 'speed-bar' + (speed > continuousParams.startThreshold ? ' high' : speed > continuousParams.stopThreshold ? ' medium' : '');
+            document.getElementById('speedValue').textContent = speed.toFixed(3);
+            document.getElementById('startLine').style.left = (continuousParams.startThreshold / maxDisplay * 100) + '%';
+            document.getElementById('stopLine').style.left = (continuousParams.stopThreshold / maxDisplay * 100) + '%';
+        }
+
+        function toggleContinuous() { if (!continuousRunning) startContinuous(); else stopContinuous(); }
+
+        function startContinuous() {
+            continuousRunning = true; detectState = 'IDLE'; actionFrames = []; stoppingCount = 0; resultHistory = [];
+            document.getElementById('continuousBtn').textContent = '⏹ 停止'; document.getElementById('continuousBtn').className = 'btn-recording';
+            document.getElementById('overlay').classList.add('detecting'); document.getElementById('overlay').textContent = '等待动作...';
+            document.getElementById('detectState').textContent = 'IDLE'; document.getElementById('streamItems').innerHTML = '';
+            addLog('🚀 开始连续识别', 'success');
+        }
+
+        function stopContinuous() {
+            continuousRunning = false; detectState = 'IDLE';
+            document.getElementById('continuousBtn').textContent = '🔄 开始连续识别'; document.getElementById('continuousBtn').className = 'btn-continuous';
+            document.getElementById('overlay').classList.remove('detecting'); document.getElementById('overlay').textContent = '已停止';
+            addLog('停止连续识别', 'info');
+        }
+
+        function captureFrame(buffer) {
+            const tempCanvas = document.createElement('canvas'); tempCanvas.width = webcam.videoWidth; tempCanvas.height = webcam.videoHeight;
+            tempCanvas.getContext('2d').drawImage(webcam, 0, 0);
+            buffer.push(tempCanvas.toDataURL('image/jpeg', 0.8).split(',')[1]);
+        }
+
+        function processDetection() {
+            const speed = getSmoothedSpeed();
+            document.getElementById('queueCount').textContent = processingCount;
+
+            if (detectState === 'IDLE') {
+                if (speed > continuousParams.startThreshold) {
+                    detectState = 'ACTIVE'; actionFrames = []; stoppingCount = 0;
+                    document.getElementById('detectState').textContent = 'ACTIVE';
+                    document.getElementById('overlay').textContent = '采集中...';
+                    document.getElementById('actionInfo').textContent = '动作中';
+                    addLog('▶ 动作开始', 'action');
+                }
+            } else if (detectState === 'ACTIVE') {
+                captureFrame(actionFrames);
+                document.getElementById('frameValue').textContent = actionFrames.length;
+
+                if (speed < continuousParams.stopThreshold) {
+                    stoppingCount++;
+                    document.getElementById('actionInfo').textContent = `减速 ${stoppingCount}/${continuousParams.stopFrames}`;
+                    if (stoppingCount >= continuousParams.stopFrames) {
+                        if (actionFrames.length >= continuousParams.minFrames) {
+                            addLog(`■ 动作结束: ${actionFrames.length} 帧`, 'action');
+                            sendRecognitionAsync([...actionFrames]);
+                        } else { addLog(`帧数不足(${actionFrames.length})，丢弃`, 'warning'); }
+                        detectState = 'IDLE'; actionFrames = []; stoppingCount = 0;
+                        document.getElementById('detectState').textContent = 'IDLE';
+                        document.getElementById('overlay').textContent = '等待动作...';
+                        document.getElementById('actionInfo').textContent = '等待动作';
+                    }
+                } else { stoppingCount = 0; document.getElementById('actionInfo').textContent = '动作中'; }
+
+                if (actionFrames.length >= continuousParams.maxFrames) {
+                    addLog('达到最大帧数，强制分割', 'warning');
+                    sendRecognitionAsync([...actionFrames]);
+                    detectState = 'IDLE'; actionFrames = []; stoppingCount = 0;
+                    document.getElementById('detectState').textContent = 'IDLE';
+                }
+            }
+        }
+
+        async function sendRecognitionAsync(frames) {
+            processingCount++;
+            document.getElementById('queueCount').textContent = processingCount;
+            // 显示"请继续下一个"提示
+            showReadyNextHint();
+
+            const resultId = Date.now();
+            try {
+                const response = await fetch(`${API_URL}/recognize`, {
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ frames, confidence_threshold: continuousParams.confThreshold, auto_add: true, trim_frames: 2 })
+                });
+                const result = await response.json();
+                if (result.success) {
+                    displayResultContinuous(result.prediction, result.confidence, result.added);
+                    const historyItem = { id: resultId, prediction: result.prediction, confidence: result.confidence, top_predictions: result.top_predictions, added: result.added, frameCount: frames.length, time: new Date().toLocaleTimeString('zh-CN', {hour12: false}) };
+                    resultHistory.unshift(historyItem);
+                    addToResultStream(historyItem);
+                    if (result.sequence) { wordSequence = result.sequence; updateSequenceDisplay(); }
+                    addLog(`✅ ${result.prediction} (${(result.confidence*100).toFixed(0)}%) ${result.added ? '✓' : ''}`, 'success');
+                } else { addLog(`❌ 识别失败: ${result.error}`, 'warning'); }
+            } catch (error) { addLog('❌ 请求失败', 'warning'); }
+            processingCount--; document.getElementById('queueCount').textContent = processingCount;
+        }
+
+        // 显示"请继续下一个"的提示
+        let readyNextTimeout = null;
+        function showReadyNextHint() {
+            const statusEl = document.getElementById('parallelStatus');
+            // 清除之前的timeout
+            if (readyNextTimeout) clearTimeout(readyNextTimeout);
+            // 添加ready-next类，触发动画和样式
+            statusEl.classList.add('ready-next');
+            // 2秒后移除
+            readyNextTimeout = setTimeout(() => {
+                statusEl.classList.remove('ready-next');
+            }, 2000);
+        }
+
+        function displayResultContinuous(prediction, confidence, added) {
+            const el = document.getElementById('currentWord');
+            el.textContent = prediction; el.className = 'label' + (added ? ' success' : '');
+            document.getElementById('confidence').textContent = `置信度: ${(confidence*100).toFixed(1)}%` + (added ? ' ✓' : '');
+            if (added) setTimeout(() => { el.className = 'label'; }, 600);
+        }
+
+        function addToResultStream(item) {
+            const container = document.getElementById('streamItems');
+            const div = document.createElement('div'); div.className = 'stream-item' + (item.added ? ' added' : ''); div.dataset.id = item.id;
+            const candidatesHtml = item.top_predictions.map((c, i) => `<span class="candidate-chip ${i === 0 ? 'top1' : ''}" onclick="event.stopPropagation(); addWordFromCandidate('${c.label}')">${c.label}<small>${(c.confidence*100).toFixed(0)}%</small></span>`).join('');
+            div.innerHTML = `<div class="stream-item-header" onclick="toggleStreamItem(${item.id})"><span class="word">${item.prediction}</span><span class="meta">${(item.confidence*100).toFixed(0)}% · ${item.frameCount}帧</span></div><div class="stream-item-candidates"><div style="font-size:0.8em;color:var(--text-light);margin-bottom:6px;">点击添加：</div>${candidatesHtml}</div>`;
+            container.insertBefore(div, container.firstChild);
+            while (container.children.length > 15) container.removeChild(container.lastChild);
+        }
+
+        function toggleStreamItem(id) { document.querySelectorAll('.stream-item').forEach(item => { item.classList.toggle('expanded', parseInt(item.dataset.id) === id); }); }
+
+        async function addWordFromCandidate(label) {
+            try {
+                const response = await fetch(`${API_URL}/confirm_word`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({label}) });
+                const result = await response.json();
+                if (result.success) { wordSequence = result.sequence; updateSequenceDisplay(); document.getElementById('currentWord').textContent = label; addLog(`+添加: ${label}`, 'success'); }
+            } catch (error) { addLog('添加失败', 'warning'); }
+        }
+
+        // ==================== 公共功能 ====================
+        function displayResult(prediction, confidence) {
+            const wordEl = document.getElementById('currentWord'), confEl = document.getElementById('confidence');
+            wordEl.style.color = '';
+            predictionBuffer.push(prediction); if (predictionBuffer.length > BUFFER_SIZE) predictionBuffer.shift();
+            const counts = {}; let maxCount = 0, finalPrediction = prediction;
+            for (const p of predictionBuffer) { counts[p] = (counts[p] || 0) + 1; if (counts[p] > maxCount) { maxCount = counts[p]; finalPrediction = p; } }
+            if (maxCount >= Math.ceil(BUFFER_SIZE / 2)) {
+                if (lastDisplayedPrediction !== finalPrediction) { wordEl.style.transform = 'scale(1.1)'; setTimeout(() => { wordEl.style.transform = 'scale(1)'; }, 200); lastDisplayedPrediction = finalPrediction; }
+                wordEl.textContent = finalPrediction; confEl.textContent = `匹配度: ${(confidence * 100).toFixed(1)}%`;
+            } else { wordEl.textContent = `${prediction}?`; confEl.textContent = `匹配度: ${(confidence * 100).toFixed(1)}% (分析中...)`; }
+        }
+
+        function updateSequenceDisplay() {
+            const container = document.getElementById('wordSequence');
+            if (wordSequence.length === 0) {
+                container.innerHTML = '<span class="placeholder">点击上方候选词确认</span>';
+                return;
+            }
+
+            // 生成不带内联事件的 HTML
+            container.innerHTML = wordSequence.map((word, index) =>
+                `<span class="word-tag" data-index="${index}">${word}<button class="delete-btn" data-index="${index}">×</button></span>`
+            ).join('');
+
+            // 为每个 .word-tag 绑定拖拽事件
+            document.querySelectorAll('.word-tag').forEach(tag => {
+                const idx = parseInt(tag.dataset.index);
+                tag.setAttribute('draggable', 'true');
+
+                tag.addEventListener('dragstart', (e) => handleDragStart(e, idx));
+                tag.addEventListener('dragover', (e) => handleDragOver(e, idx));
+                tag.addEventListener('dragleave', handleDragLeave);
+                tag.addEventListener('drop', (e) => handleDrop(e, idx));
+                tag.addEventListener('dragend', handleDragEnd);
+            });
+
+            // 为每个删除按钮绑定点击事件
+            document.querySelectorAll('.delete-btn').forEach(btn => {
+                const idx = parseInt(btn.dataset.index);
+                btn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    deleteWord(idx);
+                });
+            });
+
+            // 向父页面发送当前序列（保持原有通信）
+            if (window.parent && window.parent !== window) {
+                window.parent.postMessage({ type: 'sequenceUpdated', sequence: wordSequence }, '*');
+            }
+        }
+
+        function handleDragStart(e, index) { draggedIndex = index; e.target.classList.add('dragging'); e.dataTransfer.effectAllowed = 'move'; }
+        function handleDragOver(e, index) { e.preventDefault(); if (draggedIndex !== null && draggedIndex !== index) e.target.classList.add('drag-over'); }
+        function handleDragLeave(e) { e.target.classList.remove('drag-over'); }
+        function handleDrop(e, targetIndex) {
+            e.preventDefault(); e.target.classList.remove('drag-over');
+            if (draggedIndex !== null && draggedIndex !== targetIndex) {
+                const item = wordSequence[draggedIndex]; wordSequence.splice(draggedIndex, 1); wordSequence.splice(targetIndex, 0, item);
+                updateSequenceDisplay(); syncSequenceToServer(); addLog(`移动: ${item} → 位置${targetIndex + 1}`, 'info');
+            }
+        }
+        function handleDragEnd(e) { e.target.classList.remove('dragging'); document.querySelectorAll('.word-tag').forEach(el => el.classList.remove('drag-over')); draggedIndex = null; }
+        async function deleteWord(index) { const word = wordSequence[index]; wordSequence.splice(index, 1); updateSequenceDisplay(); syncSequenceToServer(); addLog(`删除: ${word}`, 'info'); }
+        async function syncSequenceToServer() { try { await fetch(`${API_URL}/clear_sequence`, {method: 'POST'}); for (const word of wordSequence) await fetch(`${API_URL}/confirm_word`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({label: word}) }); } catch (e) {} }
+
+        function displayTriageResult(triage) {
+            const triageDiv = document.getElementById('triageResult'), badge = document.getElementById('triageBadge');
+            triageDiv.classList.remove('level-1', 'level-2', 'level-3', 'level-4'); badge.classList.remove('level-1', 'level-2', 'level-3', 'level-4');
+            const level = triage.urgency_level || 3;
+            triageDiv.classList.add(`level-${level}`); badge.classList.add(`level-${level}`);
+            document.getElementById('triageLevel').textContent = level;
+            document.getElementById('triageLevelText').textContent = triage.urgency_name || '较急';
+            document.getElementById('triageDepartment').textContent = triage.department || '急诊内科';
+            document.getElementById('triageReason').textContent = triage.reason || '请医生进一步评估';
+            document.getElementById('triageAdvice').textContent = triage.advice || '请耐心等候';
+            triageDiv.classList.remove('hidden');
+        }
+        function hideTriageResult() { document.getElementById('triageResult').classList.add('hidden'); }
+
+        async function polishSequence() {
+            if (wordSequence.length === 0) { alert('请先通过手语告诉我您想说什么 😊'); return; }
+            const resultDiv = document.getElementById('polishedResult'), textDiv = document.getElementById('polishedText');
+            resultDiv.classList.remove('hidden'); textDiv.textContent = '正在整理您想说的话...';
+            hideTriageResult();
+            try {
+                const response = await fetch(`${API_URL}/polish_and_triage`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({words: wordSequence, context: '急诊分诊'}) });
+                const result = await response.json();
+                if (result.success) { textDiv.textContent = result.polished; if (result.triage) displayTriageResult(result.triage); }
+                else { textDiv.textContent = '抱歉，整理失败了'; }
+            } catch (error) { textDiv.textContent = '连接出了点问题'; }
+        }
+
+        async function clearSequence() {
+            wordSequence = []; updateSequenceDisplay();
+            document.getElementById('currentWord').textContent = '-'; document.getElementById('currentWord').style.color = '';
+            document.getElementById('confidence').textContent = '-';
+            document.getElementById('polishedResult').classList.add('hidden'); hideTriageResult();
+            clearPredictionBuffer(); clearCandidates();
+            document.getElementById('streamItems').innerHTML = ''; resultHistory = [];
+            try { await fetch(`${API_URL}/clear_sequence`, {method: 'POST'}); } catch (e) {}
+            addLog('序列已清空', 'info');
+        }
+
+        function clearAll() {
+            clearSequence();
+            document.getElementById('overlay').textContent = '准备就绪';
+            document.getElementById('overlay').classList.remove('recording', 'detecting');
+            framesBuffer = []; actionFrames = [];
+        }
+
+        function updateIsolatedSettings() {
+            // 使用默认值（设置面板已移除）
+            if (holistic) try { holistic.setOptions({ minDetectionConfidence: isolatedSettings.minDetectionConfidence, minTrackingConfidence: isolatedSettings.minTrackingConfidence }); } catch (e) {}
+        }
+
+        function updateContinuousSetting(id, value) {
+            continuousParams[id] = value;
+        }
+
+        function addLog(message, type = '') {
+            const container = document.getElementById('logContainer'), entry = document.createElement('div');
+            entry.className = 'log-entry ' + type;
+            entry.textContent = `[${new Date().toLocaleTimeString('zh-CN', {hour12: false})}] ${message}`;
+            container.appendChild(entry); container.scrollTop = container.scrollHeight;
+            while (container.children.length > 30) container.removeChild(container.firstChild);
+        }
+    </script>
+</body>
+</html>
