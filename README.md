@@ -6,7 +6,17 @@
 
 - 已安装 Python 3.9+
 - 已安装并启动 MySQL
-- 数据库已创建并导入测试数据（见你已有的 SQL 脚本）
+- 数据库已创建并导入测试数据（见 `db/init.sql`）
+
+### 初始化数据库
+
+在项目根目录执行：
+
+```bash
+mysql -u root -p < db/init.sql
+```
+
+随后请在 `backend/database.py` 中确认数据库账号与密码。
 
 ## 后端启动
 
