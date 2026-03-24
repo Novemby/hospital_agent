@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from enum import Enum
 from typing import Dict, Optional
 
@@ -41,6 +41,7 @@ class RegistrationAgentChatRequest(BaseModel):
 class RegistrationSubmitRequest(BaseModel):
     patient_id: int
     department: str
+    schedule_id: Optional[int] = None
     triage_symptoms: Optional[str] = None
 
 
@@ -48,6 +49,14 @@ class RegistrationSubmitRequest(BaseModel):
 agent_sessions: Dict[str, dict] = {}
 
 DEPARTMENTS = ["骨科", "发热门诊", "体检中心", "耳鼻喉科", "内科"]
+
+DEPARTMENT_CODE_MAP = {
+    "骨科": "GK",
+    "发热门诊": "FR",
+    "体检中心": "TJ",
+    "耳鼻喉科": "EBH",
+    "内科": "NK",
+}
 
 
 def detect_department(text: str) -> Optional[str]:
@@ -61,7 +70,7 @@ def detect_date(text: str) -> Optional[str]:
     if "今天" in text:
         return datetime.now().strftime("%Y-%m-%d")
     if "明天" in text:
-        return datetime.now().strftime("%Y-%m-%d")
+        return (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
     return None
 
 
@@ -89,6 +98,85 @@ def make_agent_response(reply: str, session: dict, required_fields=None, options
         "next_action": next_action,
         "slots": session["slots"],
     }
+
+
+def _allocate_queue_number(db: Session, department: str, queue_date_str: Optional[str] = None) -> str:
+    """按 科室+日期 事务安全地分配排队号"""
+    queue_date = datetime.strptime(queue_date_str, "%Y-%m-%d").date() if queue_date_str else datetime.now().date()
+
+    counter = db.query(models.QueueCounter).filter(
+        models.QueueCounter.department == department,
+        models.QueueCounter.queue_date == queue_date,
+    ).with_for_update().first()
+
+    if not counter:
+        counter = models.QueueCounter(
+            department=department,
+            queue_date=queue_date,
+            current_no=0,
+        )
+        db.add(counter)
+        db.flush()
+
+    counter.current_no += 1
+    seq = counter.current_no
+    dept_code = DEPARTMENT_CODE_MAP.get(department, "OT")
+    return f"{dept_code}{queue_date.strftime('%Y%m%d')}-{seq:03d}"
+
+
+def _get_or_create_department(db: Session, department_name: str) -> models.Department:
+    dept = db.query(models.Department).filter(models.Department.dept_name == department_name).first()
+    if dept:
+        return dept
+
+    dept = models.Department(
+        dept_code=DEPARTMENT_CODE_MAP.get(department_name, "OT"),
+        dept_name=department_name,
+        is_active=True,
+    )
+    db.add(dept)
+    db.flush()
+    return dept
+
+
+def _get_or_create_schedule(
+    db: Session,
+    department_id: int,
+    queue_date_str: Optional[str] = None,
+    schedule_id: Optional[int] = None,
+) -> models.Schedule:
+    if schedule_id:
+        schedule = db.query(models.Schedule).filter(models.Schedule.id == schedule_id).first()
+        if not schedule:
+            raise HTTPException(status_code=404, detail="排班不存在")
+        return schedule
+
+    queue_date = datetime.strptime(queue_date_str, "%Y-%m-%d").date() if queue_date_str else datetime.now().date()
+    schedule = db.query(models.Schedule).filter(
+        models.Schedule.department_id == department_id,
+        models.Schedule.schedule_date == queue_date,
+        models.Schedule.time_period == "AM",
+        models.Schedule.is_open == True,
+    ).with_for_update().first()
+
+    if not schedule:
+        schedule = models.Schedule(
+            department_id=department_id,
+            doctor_id=None,
+            schedule_date=queue_date,
+            time_period="AM",
+            capacity_total=50,
+            capacity_used=0,
+            is_open=True,
+        )
+        db.add(schedule)
+        db.flush()
+
+    if schedule.capacity_used >= schedule.capacity_total:
+        raise HTTPException(status_code=400, detail="当前时段号源已满")
+
+    schedule.capacity_used += 1
+    return schedule
 
 
 # 自动在数据库中创建表（如果表已存在则忽略）
@@ -325,33 +413,92 @@ def doctor_login(login_data: DoctorLoginRequest, db: Session = Depends(get_db)):
 
 
 @app.get("/api/registration/departments")
-def get_registration_departments():
-    """挂号可选科室列表"""
-    return {"departments": DEPARTMENTS}
+def get_registration_departments(db: Session = Depends(get_db)):
+    """挂号可选科室列表（优先读数据库）"""
+    db_departments = db.query(models.Department).filter(models.Department.is_active == True).all()
+    if db_departments:
+        return {
+            "departments": [d.dept_name for d in db_departments],
+            "items": [
+                {"id": d.id, "dept_code": d.dept_code, "dept_name": d.dept_name}
+                for d in db_departments
+            ]
+        }
+
+    return {
+        "departments": DEPARTMENTS,
+        "items": [
+            {"id": None, "dept_code": DEPARTMENT_CODE_MAP.get(name, "OT"), "dept_name": name}
+            for name in DEPARTMENTS
+        ]
+    }
 
 
 @app.get("/api/registration/slots")
 def get_registration_slots(department: str = Query(...), date: str = Query(...), db: Session = Depends(get_db)):
-    """查询科室可用医生与模拟号源"""
+    """查询科室可用医生与号源时段"""
+    dept = db.query(models.Department).filter(models.Department.dept_name == department).first()
+    if not dept:
+        dept = _get_or_create_department(db, department)
+        db.commit()
+        db.refresh(dept)
+
+    schedules = db.query(models.Schedule).filter(
+        models.Schedule.department_id == dept.id,
+        models.Schedule.schedule_date == datetime.strptime(date, "%Y-%m-%d").date(),
+        models.Schedule.is_open == True,
+    ).all()
+
+    if not schedules:
+        am_schedule = models.Schedule(
+            department_id=dept.id,
+            doctor_id=None,
+            schedule_date=datetime.strptime(date, "%Y-%m-%d").date(),
+            time_period="AM",
+            capacity_total=50,
+            capacity_used=0,
+            is_open=True,
+        )
+        pm_schedule = models.Schedule(
+            department_id=dept.id,
+            doctor_id=None,
+            schedule_date=datetime.strptime(date, "%Y-%m-%d").date(),
+            time_period="PM",
+            capacity_total=50,
+            capacity_used=0,
+            is_open=True,
+        )
+        db.add(am_schedule)
+        db.add(pm_schedule)
+        db.commit()
+        schedules = [am_schedule, pm_schedule]
+
     doctors = db.query(models.Doctor).filter(
         models.Doctor.department == department,
         models.Doctor.is_available == 1
     ).all()
 
-    slots = []
-    for i, doctor in enumerate(doctors, start=1):
-        slots.append({
-            "slot_id": f"{department}-{date}-{i}",
-            "doctor_id": doctor.id,
-            "doctor_name": doctor.name,
-            "department": doctor.department,
+    doctor_name = doctors[0].name if doctors else "待分配"
+    doctor_id = doctors[0].id if doctors else None
+
+    slots = [
+        {
+            "slot_id": s.id,
+            "doctor_id": doctor_id,
+            "doctor_name": doctor_name,
+            "department": department,
             "date": date,
-            "period": "上午" if i % 2 else "下午",
-            "remain": max(0, 10 - i),
-        })
+            "period": "上午" if s.time_period == "AM" else "下午",
+            "remain": max(0, s.capacity_total - s.capacity_used),
+            "capacity_total": s.capacity_total,
+            "capacity_used": s.capacity_used,
+        }
+        for s in schedules
+    ]
 
     return {
         "department": department,
+        "department_id": dept.id,
         "date": date,
         "slots": slots,
     }
@@ -359,31 +506,37 @@ def get_registration_slots(department: str = Query(...), date: str = Query(...),
 
 @app.post("/api/registration/submit")
 def submit_registration(payload: RegistrationSubmitRequest, db: Session = Depends(get_db)):
-    """提交挂号（MVP版本）"""
+    """提交挂号（按科室+日期安全发号，写入科室/排班外键）"""
     patient = db.query(models.Patient).filter(models.Patient.id == payload.patient_id).first()
     if not patient:
         raise HTTPException(status_code=404, detail="患者不存在")
 
-    today_count = db.query(models.Registration).filter(
-        models.Registration.department == payload.department
-    ).count()
+    try:
+        dept = _get_or_create_department(db, payload.department)
+        schedule = _get_or_create_schedule(db, dept.id, schedule_id=payload.schedule_id)
+        queue_number = _allocate_queue_number(db, payload.department, schedule.schedule_date.strftime("%Y-%m-%d"))
 
-    queue_number = f"{payload.department[:1].upper()}{today_count + 1:02d}"
-
-    reg = models.Registration(
-        patient_id=payload.patient_id,
-        department=payload.department,
-        queue_number=queue_number,
-        current_state="WAITING",
-        triage_symptoms=payload.triage_symptoms,
-    )
-    db.add(reg)
-    db.commit()
-    db.refresh(reg)
+        reg = models.Registration(
+            patient_id=payload.patient_id,
+            department_id=dept.id,
+            schedule_id=schedule.id,
+            department=payload.department,
+            queue_number=queue_number,
+            current_state="WAITING",
+            triage_symptoms=payload.triage_symptoms,
+        )
+        db.add(reg)
+        db.commit()
+        db.refresh(reg)
+    except Exception:
+        db.rollback()
+        raise
 
     return {
         "registration_id": reg.id,
         "patient_id": reg.patient_id,
+        "department_id": reg.department_id,
+        "schedule_id": reg.schedule_id,
         "department": reg.department,
         "queue_number": reg.queue_number,
         "current_state": reg.current_state,
@@ -469,21 +622,36 @@ def registration_agent_chat(payload: RegistrationAgentChatRequest, db: Session =
         if "确认" in text or lower_text in ["ok", "yes", "y"]:
             session["state"] = RegistrationAgentState.SUBMIT.value
 
-            today_count = db.query(models.Registration).filter(
-                models.Registration.department == session["slots"]["department"]
-            ).count()
-            queue_number = f"{session['slots']['department'][:1].upper()}{today_count + 1:02d}"
+            try:
+                queue_number = _allocate_queue_number(
+                    db,
+                    session["slots"]["department"],
+                    session["slots"].get("date"),
+                )
 
-            reg = models.Registration(
-                patient_id=payload.patient_id,
-                department=session["slots"]["department"],
-                queue_number=queue_number,
-                current_state="WAITING",
-                triage_symptoms=session["slots"]["triage_symptoms"],
-            )
-            db.add(reg)
-            db.commit()
-            db.refresh(reg)
+                dept = _get_or_create_department(db, session["slots"]["department"])
+                schedule = _get_or_create_schedule(
+                    db,
+                    dept.id,
+                    queue_date_str=session["slots"].get("date"),
+                    schedule_id=None,
+                )
+
+                reg = models.Registration(
+                    patient_id=payload.patient_id,
+                    department_id=dept.id,
+                    schedule_id=schedule.id,
+                    department=session["slots"]["department"],
+                    queue_number=queue_number,
+                    current_state="WAITING",
+                    triage_symptoms=session["slots"]["triage_symptoms"],
+                )
+                db.add(reg)
+                db.commit()
+                db.refresh(reg)
+            except Exception:
+                db.rollback()
+                raise
 
             session["state"] = RegistrationAgentState.SUCCESS.value
             return make_agent_response(

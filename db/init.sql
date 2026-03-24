@@ -26,15 +26,50 @@ CREATE TABLE IF NOT EXISTS sys_doctor (
     password VARCHAR(50) NOT NULL DEFAULT '123456' COMMENT '登录密码'
 );
 
+CREATE TABLE IF NOT EXISTS sys_department (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '科室唯一ID',
+    dept_code VARCHAR(20) NOT NULL UNIQUE COMMENT '科室编码',
+    dept_name VARCHAR(50) NOT NULL UNIQUE COMMENT '科室名称',
+    is_active TINYINT NOT NULL DEFAULT 1 COMMENT '是否启用',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间'
+);
+
+CREATE TABLE IF NOT EXISTS biz_schedule (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '排班号源ID',
+    department_id BIGINT NOT NULL COMMENT '关联科室ID',
+    doctor_id BIGINT NULL COMMENT '关联医生ID，可空',
+    schedule_date DATE NOT NULL COMMENT '排班日期',
+    time_period VARCHAR(20) NOT NULL COMMENT '时间段，如 AM/PM',
+    capacity_total INT NOT NULL DEFAULT 20 COMMENT '总号源',
+    capacity_used INT NOT NULL DEFAULT 0 COMMENT '已使用号源',
+    is_open TINYINT NOT NULL DEFAULT 1 COMMENT '是否开放挂号',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    FOREIGN KEY (department_id) REFERENCES sys_department(id),
+    FOREIGN KEY (doctor_id) REFERENCES sys_doctor(id)
+);
+
 CREATE TABLE IF NOT EXISTS biz_registration (
     id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '挂号单据全局唯一ID',
     patient_id BIGINT NOT NULL COMMENT '关联患者表',
-    department VARCHAR(50) NOT NULL COMMENT '患者挂号的日间科室',
-    queue_number VARCHAR(20) NOT NULL COMMENT '系统分配的排队序号',
+    department_id BIGINT NOT NULL COMMENT '关联科室ID',
+    schedule_id BIGINT NOT NULL COMMENT '关联号源ID',
+    department VARCHAR(50) NOT NULL COMMENT '患者挂号的日间科室（冗余字段）',
+    queue_number VARCHAR(30) NOT NULL COMMENT '系统分配的排队序号',
     current_state VARCHAR(20) NOT NULL COMMENT '状态机节点标识',
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '挂号业务发生时间',
     triage_symptoms TEXT COMMENT '分诊初始主诉',
-    FOREIGN KEY (patient_id) REFERENCES sys_patient(id)
+    FOREIGN KEY (patient_id) REFERENCES sys_patient(id),
+    FOREIGN KEY (department_id) REFERENCES sys_department(id),
+    FOREIGN KEY (schedule_id) REFERENCES biz_schedule(id)
+);
+
+CREATE TABLE IF NOT EXISTS biz_queue_counter (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '计数器唯一ID',
+    department VARCHAR(50) NOT NULL COMMENT '科室名称',
+    queue_date DATE NOT NULL COMMENT '排队日期',
+    current_no INT NOT NULL DEFAULT 0 COMMENT '当前已发号码',
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    UNIQUE KEY uq_dept_queue_date (department, queue_date)
 );
 
 CREATE TABLE IF NOT EXISTS biz_medical_record (
@@ -76,6 +111,9 @@ TRUNCATE TABLE biz_chat_message;
 TRUNCATE TABLE ai_agent_memory;
 TRUNCATE TABLE biz_medical_record;
 TRUNCATE TABLE biz_registration;
+TRUNCATE TABLE biz_schedule;
+TRUNCATE TABLE biz_queue_counter;
+TRUNCATE TABLE sys_department;
 TRUNCATE TABLE sys_doctor;
 TRUNCATE TABLE sys_patient;
 SET FOREIGN_KEY_CHECKS = 1;
@@ -93,10 +131,22 @@ INSERT INTO sys_patient (id, name, gender, birth_date, contact_phone, id_card, a
 (1002, '李四', 1, '1992-08-20', '13900139002', '234567', '青霉素', 0),
 (1003, '王五', 1, '1985-11-11', '13700137003', '345678', '无', 0);
 
+-- 插入科室与排班测试数据
+INSERT INTO sys_department (id, dept_code, dept_name, is_active) VALUES
+(1, 'GK', '骨科', 1),
+(2, 'FR', '发热门诊', 1),
+(3, 'TJ', '体检中心', 1),
+(4, 'EBH', '耳鼻喉科', 1),
+(5, 'NK', '内科', 1);
+
+INSERT INTO biz_schedule (id, department_id, doctor_id, schedule_date, time_period, capacity_total, capacity_used, is_open) VALUES
+(20001, 1, 1, CURDATE(), 'AM', 50, 1, 1),
+(20002, 2, 2, CURDATE(), 'AM', 50, 1, 1);
+
 -- 插入挂号流水数据
-INSERT INTO biz_registration (id, patient_id, department, queue_number, current_state, triage_symptoms) VALUES
-(10001, 1001, '骨科', 'A01', 'IN_CONSULTATION', '左边肩膀酸疼，手抬不起，持续一周'),
-(10002, 1002, '发热门诊', 'B05', 'WAITING_TRIAGE', '头痛、发热两天');
+INSERT INTO biz_registration (id, patient_id, department_id, schedule_id, department, queue_number, current_state, triage_symptoms) VALUES
+(10001, 1001, 1, 20001, '骨科', 'GK20260324-001', 'IN_CONSULTATION', '左边肩膀酸疼，手抬不起，持续一周'),
+(10002, 1002, 2, 20002, '发热门诊', 'FR20260324-001', 'WAITING_TRIAGE', '头痛、发热两天');
 
 -- 插入病历数据
 INSERT INTO biz_medical_record (id, registration_id, doctor_id, chief_complaint, diagnosis, treatment_plan) VALUES

@@ -1,7 +1,9 @@
-import { createApp, ref, computed, watch, onMounted, onUnmounted } from 'vue';
+import { createApp, ref, computed, watch, onUnmounted } from 'vue';
 import { getPatientById, upsertPatient, addMessage } from './services/patientService.js';
 import { patientLoginAPI, setCurrentPatient, getCurrentPatient, clearAuth } from './services/authService.js';
 import { SignLanguageAgent } from './services/signLanguageAgent.js';
+
+const API_BASE_URL = 'http://localhost:8000/api';
 
 const app = createApp({
     setup() {
@@ -196,15 +198,99 @@ const app = createApp({
             recordDisabled.value = true;
         };
 
-        const quickAppointment = () => {
-            const dept = prompt('请输入预约科室', '内科');
-            if (dept) {
+        const quickAppointment = async () => {
+            if (!currentId.value) {
+                alert('请先登录患者账号');
+                return;
+            }
+
+            try {
+                // 1) 获取科室列表
+                const deptResp = await fetch(`${API_BASE_URL}/registration/departments`);
+                const deptResult = await deptResp.json();
+                if (!deptResp.ok) {
+                    throw new Error(deptResult.detail || '获取科室列表失败');
+                }
+
+                const departments = deptResult.departments || [];
+                if (!departments.length) {
+                    alert('当前暂无可预约科室');
+                    return;
+                }
+
+                const deptPrompt = departments.map((d, idx) => `${idx + 1}. ${d}`).join('\n');
+                const deptInput = prompt(`请选择预约科室（输入序号或科室名称）\n${deptPrompt}`, departments[0]);
+                if (!deptInput) return;
+
+                let dept = deptInput.trim();
+                const deptIndex = Number(deptInput);
+                if (!Number.isNaN(deptIndex) && deptIndex >= 1 && deptIndex <= departments.length) {
+                    dept = departments[deptIndex - 1];
+                }
+
+                if (!departments.includes(dept)) {
+                    alert('输入的科室不存在，请重新选择');
+                    return;
+                }
+
+                // 2) 选择日期并查询时段号源
+                const defaultDate = new Date().toISOString().slice(0, 10);
+                const dateInput = prompt('请输入预约日期（YYYY-MM-DD）', defaultDate);
+                if (!dateInput) return;
+
+                const slotResp = await fetch(`${API_BASE_URL}/registration/slots?department=${encodeURIComponent(dept)}&date=${encodeURIComponent(dateInput)}`);
+                const slotResult = await slotResp.json();
+                if (!slotResp.ok) {
+                    throw new Error(slotResult.detail || '查询号源失败');
+                }
+
+                const slots = slotResult.slots || [];
+                const availableSlots = slots.filter(s => (s.remain || 0) > 0);
+                if (!availableSlots.length) {
+                    alert('该日期暂无可用号源，请更换日期或科室');
+                    return;
+                }
+
+                const slotPrompt = availableSlots
+                    .map((s, idx) => `${idx + 1}. ${s.period}（余号 ${s.remain}）`) 
+                    .join('\n');
+                const slotInput = prompt(`请选择预约时段（输入序号）\n${slotPrompt}`, '1');
+                if (!slotInput) return;
+
+                const selectedIndex = Number(slotInput);
+                if (Number.isNaN(selectedIndex) || selectedIndex < 1 || selectedIndex > availableSlots.length) {
+                    alert('时段序号不正确');
+                    return;
+                }
+
+                const selectedSlot = availableSlots[selectedIndex - 1];
+
+                // 3) 提交挂号（带 schedule_id）
+                const response = await fetch(`${API_BASE_URL}/registration/submit`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        patient_id: Number(currentId.value),
+                        department: dept,
+                        schedule_id: selectedSlot.slot_id,
+                        triage_symptoms: null
+                    })
+                });
+
+                const result = await response.json();
+                if (!response.ok) {
+                    throw new Error(result.detail || '挂号失败');
+                }
+
                 const patient = getPatientById(currentId.value);
                 if (patient) {
                     patient.dept = dept;
                     upsertPatient(patient);
-                    alert(`已预约 ${dept}，号序 A0${Math.floor(Math.random()*10)}`);
                 }
+
+                alert(`挂号成功：${result.department}（${selectedSlot.period}），排队号 ${result.queue_number}`);
+            } catch (error) {
+                alert(error.message || '挂号失败，请稍后再试');
             }
         };
         const quickTakeNumber = () => {
