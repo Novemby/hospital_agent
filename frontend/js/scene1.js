@@ -18,6 +18,9 @@ const app = createApp({
         let mediaRecorder = null;
         let audioChunks = [];
 
+        // 新增：聊天消息列表（用于展示发送的消息）
+        const chatMessages = ref([]);
+
         // 手语 agent
         const agent = new SignLanguageAgent({
             apiUrl: 'http://localhost:8000',
@@ -260,11 +263,17 @@ const app = createApp({
             }
         };
 
-        // ========== 呼叫人工功能 ==========
+        // ========== 人工帮助功能（修改后不再alert，而是显示在聊天区） ==========
         const sendPatientMessage = (text) => {
-            if (!text.trim() || !currentId.value) return;
-            addMessage(currentId.value, { type: 'pat', content: text });
-            alert('消息已发送给医生');
+            if (!text.trim()) return;
+            // 添加到聊天消息列表
+            chatMessages.value.push({
+                id: Date.now(),
+                text: text.trim(),
+                sender: 'patient',
+                time: new Date().toLocaleTimeString()
+            });
+            // 清空输入框
             voiceText.value = '';
             recognizedText.value = '';
         };
@@ -356,7 +365,7 @@ const app = createApp({
         return {
             view, currentId, idCardInput, currentPatientName, vueWordSequence,
             showChat,
-            isRecordingVoice, voiceText, recognizedText,
+            isRecordingVoice, voiceText, recognizedText, chatMessages,
             goToRoleSelect, patientLogin, logout,
             quickAppointment, quickTakeNumber, quickPayment,
             goToSignTriage, goBack,
@@ -471,7 +480,7 @@ const app = createApp({
                                 </div>
                             </div>
 
-                            <!-- 右侧：AI 交互区 + 语音识别区 -->
+                            <!-- 右侧：AI 交互区 + 人工帮助侧边栏（含聊天记录） -->
                             <div class="space-y-6">
                                 <!-- AI 交互框 -->
                                 <div class="bg-white rounded-2xl shadow-sm p-4 border border-blue-100">
@@ -499,7 +508,7 @@ const app = createApp({
                                     </div>
                                 </div>
 
-                                <!-- 人工帮助侧边栏（语音输入） -->
+                                <!-- 人工帮助侧边栏（语音输入 + 聊天记录） -->
                                 <div class="bg-white rounded-2xl shadow-sm p-4 transition-all duration-300">
                                     <div class="flex justify-between items-center cursor-pointer" @click="showChat = !showChat">
                                         <h3 class="font-bold text-lg flex items-center gap-2">
@@ -510,7 +519,21 @@ const app = createApp({
                                         </button>
                                     </div>
                                     <div v-show="showChat" class="mt-4 transition-all duration-300">
-                                        <input v-model="voiceText" type="text" class="w-full border rounded-lg p-2 mb-2" placeholder="输入文字或使用语音...">
+                                        <!-- 聊天记录区域 -->
+                                        <div class="chat-messages max-h-64 overflow-y-auto mb-4 space-y-2">
+                                            <div v-for="msg in chatMessages" :key="msg.id" class="flex justify-end">
+                                                <div class="bg-blue-500 text-white rounded-lg px-3 py-2 max-w-xs break-words">
+                                                    <div class="text-sm">{{ msg.text }}</div>
+                                                    <div class="text-xs text-blue-100 mt-1 text-right">{{ msg.time }}</div>
+                                                </div>
+                                            </div>
+                                            <div v-if="chatMessages.length === 0" class="text-center text-gray-400 text-sm py-2">
+                                                暂无消息，发送消息后显示在此处
+                                            </div>
+                                        </div>
+
+                                        <!-- 输入区域 -->
+                                        <input v-model="voiceText" type="text" placeholder="输入文字或使用语音..." class="w-full border rounded-lg p-2 mb-2">
                                         <div v-if="recognizedText" class="mb-3 p-2 bg-yellow-50 border border-yellow-200 rounded-lg">
                                             <div class="text-sm text-gray-600 mb-2">识别结果：</div>
                                             <div class="flex items-center gap-2">
