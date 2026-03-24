@@ -1,5 +1,5 @@
 import { createApp, ref, computed, watch, onUnmounted } from 'vue';
-import { getPatientById, upsertPatient, addMessage } from './services/patientService.js';
+import { getPatientById, upsertPatient } from './services/patientService.js';
 import { patientLoginAPI, setCurrentPatient, getCurrentPatient, clearAuth } from './services/authService.js';
 import { SignLanguageAgent } from './services/signLanguageAgent.js';
 
@@ -145,6 +145,16 @@ const app = createApp({
         const cameraStarted = ref(false);
         const recordDisabled = ref(true);
 
+        // 挂号弹窗状态
+        const showAppointmentModal = ref(false);
+        const appointmentStep = ref(1); // 1:选科室 2:选日期时段
+        const departmentOptions = ref([]);
+        const selectedDepartment = ref('');
+        const selectedDate = ref(new Date().toISOString().slice(0, 10));
+        const slotOptions = ref([]);
+        const selectedSlotId = ref(null);
+        const loadingSlots = ref(false);
+
         // 当前患者姓名
         const currentPatientName = computed(() => {
             refreshKey.value;
@@ -198,80 +208,88 @@ const app = createApp({
             recordDisabled.value = true;
         };
 
+        const resetAppointmentModal = () => {
+            appointmentStep.value = 1;
+            departmentOptions.value = [];
+            selectedDepartment.value = '';
+            selectedDate.value = new Date().toISOString().slice(0, 10);
+            slotOptions.value = [];
+            selectedSlotId.value = null;
+            loadingSlots.value = false;
+        };
+
         const quickAppointment = async () => {
             if (!currentId.value) {
                 alert('请先登录患者账号');
                 return;
             }
+            resetAppointmentModal();
+            showAppointmentModal.value = true;
 
             try {
-                // 1) 获取科室列表
                 const deptResp = await fetch(`${API_BASE_URL}/registration/departments`);
                 const deptResult = await deptResp.json();
                 if (!deptResp.ok) {
                     throw new Error(deptResult.detail || '获取科室列表失败');
                 }
-
-                const departments = deptResult.departments || [];
-                if (!departments.length) {
-                    alert('当前暂无可预约科室');
-                    return;
+                departmentOptions.value = deptResult.departments || [];
+                if (departmentOptions.value.length > 0) {
+                    selectedDepartment.value = departmentOptions.value[0];
                 }
+            } catch (error) {
+                showAppointmentModal.value = false;
+                alert(error.message || '加载科室失败');
+            }
+        };
 
-                const deptPrompt = departments.map((d, idx) => `${idx + 1}. ${d}`).join('\n');
-                const deptInput = prompt(`请选择预约科室（输入序号或科室名称）\n${deptPrompt}`, departments[0]);
-                if (!deptInput) return;
+        const closeAppointmentModal = () => {
+            showAppointmentModal.value = false;
+            resetAppointmentModal();
+        };
 
-                let dept = deptInput.trim();
-                const deptIndex = Number(deptInput);
-                if (!Number.isNaN(deptIndex) && deptIndex >= 1 && deptIndex <= departments.length) {
-                    dept = departments[deptIndex - 1];
-                }
-
-                if (!departments.includes(dept)) {
-                    alert('输入的科室不存在，请重新选择');
-                    return;
-                }
-
-                // 2) 选择日期并查询时段号源
-                const defaultDate = new Date().toISOString().slice(0, 10);
-                const dateInput = prompt('请输入预约日期（YYYY-MM-DD）', defaultDate);
-                if (!dateInput) return;
-
-                const slotResp = await fetch(`${API_BASE_URL}/registration/slots?department=${encodeURIComponent(dept)}&date=${encodeURIComponent(dateInput)}`);
+        const loadSlotOptions = async () => {
+            if (!selectedDepartment.value || !selectedDate.value) {
+                alert('请先选择科室和日期');
+                return;
+            }
+            loadingSlots.value = true;
+            selectedSlotId.value = null;
+            try {
+                const slotResp = await fetch(`${API_BASE_URL}/registration/slots?department=${encodeURIComponent(selectedDepartment.value)}&date=${encodeURIComponent(selectedDate.value)}`);
                 const slotResult = await slotResp.json();
                 if (!slotResp.ok) {
                     throw new Error(slotResult.detail || '查询号源失败');
                 }
-
-                const slots = slotResult.slots || [];
-                const availableSlots = slots.filter(s => (s.remain || 0) > 0);
-                if (!availableSlots.length) {
-                    alert('该日期暂无可用号源，请更换日期或科室');
-                    return;
+                slotOptions.value = (slotResult.slots || []).filter(s => (s.remain || 0) > 0);
+                appointmentStep.value = 2;
+                if (!slotOptions.value.length) {
+                    alert('该日期暂无可用号源，请更换日期');
                 }
+            } catch (error) {
+                alert(error.message || '查询号源失败');
+            } finally {
+                loadingSlots.value = false;
+            }
+        };
 
-                const slotPrompt = availableSlots
-                    .map((s, idx) => `${idx + 1}. ${s.period}（余号 ${s.remain}）`) 
-                    .join('\n');
-                const slotInput = prompt(`请选择预约时段（输入序号）\n${slotPrompt}`, '1');
-                if (!slotInput) return;
+        const submitAppointment = async () => {
+            if (!selectedSlotId.value) {
+                alert('请选择一个可用时段');
+                return;
+            }
+            const selectedSlot = slotOptions.value.find(s => String(s.slot_id) === String(selectedSlotId.value));
+            if (!selectedSlot) {
+                alert('所选时段无效，请重新选择');
+                return;
+            }
 
-                const selectedIndex = Number(slotInput);
-                if (Number.isNaN(selectedIndex) || selectedIndex < 1 || selectedIndex > availableSlots.length) {
-                    alert('时段序号不正确');
-                    return;
-                }
-
-                const selectedSlot = availableSlots[selectedIndex - 1];
-
-                // 3) 提交挂号（带 schedule_id）
+            try {
                 const response = await fetch(`${API_BASE_URL}/registration/submit`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         patient_id: Number(currentId.value),
-                        department: dept,
+                        department: selectedDepartment.value,
                         schedule_id: selectedSlot.slot_id,
                         triage_symptoms: null
                     })
@@ -284,10 +302,11 @@ const app = createApp({
 
                 const patient = getPatientById(currentId.value);
                 if (patient) {
-                    patient.dept = dept;
+                    patient.dept = selectedDepartment.value;
                     upsertPatient(patient);
                 }
 
+                closeAppointmentModal();
                 alert(`挂号成功：${result.department}（${selectedSlot.period}），排队号 ${result.queue_number}`);
             } catch (error) {
                 alert(error.message || '挂号失败，请稍后再试');
@@ -452,8 +471,12 @@ const app = createApp({
             view, currentId, idCardInput, currentPatientName, vueWordSequence,
             showChat,
             isRecordingVoice, voiceText, recognizedText, chatMessages,
+            showAppointmentModal, appointmentStep,
+            departmentOptions, selectedDepartment, selectedDate,
+            slotOptions, selectedSlotId, loadingSlots,
             goToRoleSelect, patientLogin, logout,
-            quickAppointment, quickTakeNumber, quickPayment,
+            quickAppointment, closeAppointmentModal, loadSlotOptions, submitAppointment,
+            quickTakeNumber, quickPayment,
             goToSignTriage, goBack,
             startCamera, toggleRecording, cameraStarted, recordDisabled,
             currentWord, currentConfidence,
@@ -527,6 +550,58 @@ const app = createApp({
                             <p class="mt-2 opacity-80">专为聋哑人士提供手语转写及智能分诊</p>
                         </div>
                         <div class="bg-white text-blue-600 font-bold py-3 rounded-xl text-center mt-4">立即进入</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 预约挂号弹窗 -->
+            <div v-if="showAppointmentModal" class="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+                <div class="bg-white w-[92%] max-w-2xl rounded-2xl shadow-2xl overflow-hidden">
+                    <div class="px-6 py-4 border-b flex items-center justify-between">
+                        <h3 class="text-xl font-bold text-gray-800">预约挂号</h3>
+                        <button @click="closeAppointmentModal" class="text-gray-400 hover:text-gray-600 text-2xl leading-none">&times;</button>
+                    </div>
+
+                    <div class="p-6 space-y-5">
+                        <div class="text-sm text-gray-500">步骤 {{ appointmentStep }} / 2</div>
+
+                        <div v-if="appointmentStep === 1" class="space-y-4">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2">选择科室</label>
+                                <select v-model="selectedDepartment" class="w-full border rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-400">
+                                    <option v-for="dept in departmentOptions" :key="dept" :value="dept">{{ dept }}</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2">选择日期</label>
+                                <input v-model="selectedDate" type="date" class="w-full border rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-400">
+                            </div>
+                            <div class="flex justify-end gap-3 pt-2">
+                                <button @click="closeAppointmentModal" class="px-4 py-2 rounded-lg border text-gray-600 hover:bg-gray-50">取消</button>
+                                <button @click="loadSlotOptions" class="px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700" :disabled="loadingSlots">
+                                    {{ loadingSlots ? '加载中...' : '下一步：选择时段' }}
+                                </button>
+                            </div>
+                        </div>
+
+                        <div v-else class="space-y-4">
+                            <div class="text-sm text-gray-600">科室：<span class="font-semibold text-gray-800">{{ selectedDepartment }}</span>，日期：<span class="font-semibold text-gray-800">{{ selectedDate }}</span></div>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-72 overflow-y-auto">
+                                <label v-for="slot in slotOptions" :key="slot.slot_id" class="border rounded-xl p-4 cursor-pointer hover:border-blue-400" :class="String(selectedSlotId) === String(slot.slot_id) ? 'border-blue-500 bg-blue-50' : 'border-gray-200'">
+                                    <input type="radio" class="mr-2" :value="slot.slot_id" v-model="selectedSlotId">
+                                    <span class="font-medium text-gray-800">{{ slot.period }}</span>
+                                    <div class="text-sm text-gray-500 mt-1">余号：{{ slot.remain }} / {{ slot.capacity_total }}</div>
+                                </label>
+                            </div>
+                            <div v-if="slotOptions.length === 0" class="text-sm text-orange-600 bg-orange-50 border border-orange-200 rounded-lg p-3">当前日期无可用号源，请返回修改日期或科室。</div>
+                            <div class="flex justify-between gap-3 pt-2">
+                                <button @click="appointmentStep = 1" class="px-4 py-2 rounded-lg border text-gray-600 hover:bg-gray-50">上一步</button>
+                                <div class="flex gap-3">
+                                    <button @click="closeAppointmentModal" class="px-4 py-2 rounded-lg border text-gray-600 hover:bg-gray-50">取消</button>
+                                    <button @click="submitAppointment" class="px-4 py-2 rounded-lg bg-green-600 text-white hover:bg-green-700">确认挂号</button>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
