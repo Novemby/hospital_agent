@@ -82,3 +82,30 @@ python -m http.server 8001
 
 ### 3. 登录失败但数据库有账号
 请确认后端连接的数据库与测试数据一致，并检查 `sys_doctor` 表中的 `work_no` 与 `password` 是否匹配输入。
+
+## 项目结构
+hospital_agent/
+├── backend/
+│   ├── main.py              # FastAPI 应用入口，挂载路由
+│   ├── config.py            # 配置管理（数据库连接、百度API密钥等）
+│   ├── database.py
+│   ├── models.py
+│   ├── schemas.py           # Pydantic 模型（请求/响应结构）
+│   ├── crud.py              # 数据库操作（增删改查）
+│   ├── dependencies.py      # 依赖项（如获取当前用户、数据库会话）
+│   ├── routers/             # 路由模块
+│   │   ├── __init__.py
+│   │   ├── patients.py      # 患者相关接口
+│   │   ├── doctors.py       # 医生相关接口
+│   │   ├── registrations.py # 挂号相关接口（科室、号源、提交）
+│   │   ├── agent.py         # 挂号 Agent 对话接口
+│   │   └── speech.py        # 语音识别接口（/speech-to-text）
+│   └── utils/ # 工具函数
+│       ├── __init__.py
+│       ├── audio_utils.py   # 音频格式转换等（语音识别预处理）
+│       └── baidu_tts.py     # 百度语音识别 API 调用封装
+├── db/
+│   └── init.sql
+├── frontend/
+│   └── ...（保持不变）
+└── design.md
