@@ -1,45 +1,144 @@
-import { createApp, ref, computed, watch, onMounted } from 'vue';
+import { createApp, ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import { getPatientById, upsertPatient, addMessage } from './services/patientService.js';
 import { patientLoginAPI, setCurrentPatient, getCurrentPatient, clearAuth } from './services/authService.js';
+import { SignLanguageAgent } from './services/signLanguageAgent.js';
 
-// ==================== 手语识别全局变量 ====================
-let webcam, canvas, ctx, camera, holistic;
-let cameraStarted = false;
-let isRecording = false;
-let framesBuffer = [];
-let frameCountLocal = 0;
-let lastCaptureTime = 0;
-let predictionBuffer = [];
-const BUFFER_SIZE = 3;
-let lastDisplayedPrediction = null;
-let autoConfirmTimer = null;
-let countdownTimer = null;
-let lastTopPredictions = [];
-let wordSequence = []; // 本地词序列（与Vue同步）
-const API_URL = 'http://localhost:5000';
-
-// Holistic 连接常量
-const POSE_CONNECTIONS = [[0,1],[1,2],[2,3],[3,7],[0,4],[4,5],[5,6],[6,8],[9,10],[11,12],[11,13],[13,15],[12,14],[14,16],[11,23],[12,24],[23,24]];
-const HAND_CONNECTIONS = [[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[0,9],[9,10],[10,11],[11,12],[0,13],[13,14],[14,15],[15,16],[0,17],[17,18],[18,19],[19,20],[5,9],[9,13],[13,17]];
-
-// ==================== Vue 应用 ====================
 const app = createApp({
     setup() {
+        // ========== 原有状态 ==========
         const currentUserInfo = getCurrentPatient();
         const currentId = ref(currentUserInfo ? currentUserInfo.id : '');
         const idCardInput = ref('');
         const view = ref(currentId.value ? 'reg-home' : 'login');
         const refreshKey = ref(0);
-
-        // 侧边栏展开状态
-        const showChat = ref(false);
-
-        // 语音输入相关
+        const showChat = ref(false);          // 人工帮助侧边栏
         const isRecordingVoice = ref(false);
-        const voiceText = ref('');               // 最终确认后的文本
-        const recognizedText = ref('');           // 语音识别出的临时文本（需确认）
-        const mediaRecorder = ref(null);
-        const audioChunks = ref([]);
+        const voiceText = ref('');
+        const recognizedText = ref('');
+        let mediaRecorder = null;
+        let audioChunks = [];
+
+        // 手语 agent
+        const agent = new SignLanguageAgent({
+            apiUrl: 'http://localhost:5000',
+            onResult: (result) => {
+                // 更新识别结果显示
+                currentWord.value = result.prediction;
+                currentConfidence.value = `${(result.confidence * 100).toFixed(1)}%`;
+                // 如果有候选词，启动头部动作监听（取 top1 为默认推荐）
+                if (result.topPredictions && result.topPredictions.length) {
+                    currentCandidates.value = result.topPredictions;
+                    currentCandidateIndex.value = 0;
+                    startHeadGestureWaiting();
+                } else {
+                    currentCandidates.value = [];
+                }
+            },
+            onSequenceUpdate: (seq) => {
+                vueWordSequence.value = seq;
+            },
+            onStatusChange: (status, data) => {
+                if (status === 'recordingStart') {
+                    statusText.value = '我在看着，请比划...';
+                    overlayText.value = '录制中...';
+                    overlayClass.value = 'overlay recording';
+                } else if (status === 'sending') {
+                    statusText.value = `正在理解... (${data.frameCount}帧)`;
+                    overlayText.value = `处理 ${data.frameCount} 帧...`;
+                } else if (status === 'resultReady') {
+                    statusText.value = '请点头确认，或摇头切换候选词';
+                    overlayText.value = data.prediction;
+                    // 启动头部动作等待（超时自动取消）
+                    startHeadGestureWaiting();
+                } else if (status === 'tooShort') {
+                    statusText.value = '时间有点短，请再比划一次 😊';
+                } else if (status === 'recognitionFailed') {
+                    statusText.value = '抱歉，没能理解，请再试一次 😊';
+                } else if (status === 'networkError') {
+                    statusText.value = '连接出了点问题';
+                } else if (status === 'wordConfirmed') {
+                    statusText.value = data.isAuto ? `✓ 已自动确认「${data.word}」` : `✓ 好的，已记录「${data.word}」`;
+                } else if (status === 'emptySequence') {
+                    alert('请先通过手语输入一些内容');
+                }
+            },
+            onHeadGesture: (gesture) => {
+                if (!waitingForHeadGesture.value) return;
+                if (gesture.type === 'nod') {
+                    // 点头：确认当前候选词
+                    const currentCandidate = currentCandidates.value[currentCandidateIndex.value];
+                    if (currentCandidate) {
+                        agent.confirmWord(currentCandidate.label);
+                        waitingForHeadGesture.value = false;
+                        clearHeadGestureTimer();
+                        statusText.value = '✅ 已确认！';
+                    }
+                } else if (gesture.type === 'shake') {
+                    // 摇头：切换到下一个候选词
+                    if (currentCandidates.value.length > 1) {
+                        let nextIdx = currentCandidateIndex.value + 1;
+                        if (nextIdx >= currentCandidates.value.length) nextIdx = 0; // 循环
+                        currentCandidateIndex.value = nextIdx;
+                        const newCandidate = currentCandidates.value[nextIdx];
+                        currentWord.value = newCandidate.label;
+                        currentConfidence.value = `${(newCandidate.confidence * 100).toFixed(1)}%`;
+                        statusText.value = `切换到「${newCandidate.label}」，点头确认，摇头继续切换`;
+                        // 重置超时计时
+                        resetHeadGestureTimeout();
+                    } else {
+                        statusText.value = '仅有一个候选词，请点头确认或重新识别';
+                    }
+                }
+            }
+        });
+
+        // 头部动作等待状态
+        const waitingForHeadGesture = ref(false);
+        let headGestureTimeout = null;
+
+        const startHeadGestureWaiting = () => {
+            waitingForHeadGesture.value = true;
+            agent.enableHeadGesture(true);
+            // 设置超时，如果10秒内无动作，自动放弃并提示
+            headGestureTimeout = setTimeout(() => {
+                if (waitingForHeadGesture.value) {
+                    waitingForHeadGesture.value = false;
+                    agent.enableHeadGesture(false);
+                    statusText.value = '超时未检测到动作，请重新识别';
+                    currentCandidates.value = [];
+                }
+            }, 10000);
+        };
+
+        const resetHeadGestureTimeout = () => {
+            if (headGestureTimeout) clearTimeout(headGestureTimeout);
+            headGestureTimeout = setTimeout(() => {
+                if (waitingForHeadGesture.value) {
+                    waitingForHeadGesture.value = false;
+                    agent.enableHeadGesture(false);
+                    statusText.value = '超时未检测到动作，请重新识别';
+                    currentCandidates.value = [];
+                }
+            }, 10000);
+        };
+
+        const clearHeadGestureTimer = () => {
+            if (headGestureTimeout) clearTimeout(headGestureTimeout);
+            waitingForHeadGesture.value = false;
+            agent.enableHeadGesture(false);
+        };
+
+        // Vue 响应式数据
+        const vueWordSequence = ref([]);
+        const currentWord = ref('-');
+        const currentConfidence = ref('-');
+        const currentCandidates = ref([]);
+        const currentCandidateIndex = ref(0);
+        const statusText = ref('请先开启摄像头');
+        const overlayText = ref('等待开始...');
+        const overlayClass = ref('overlay');
+        const cameraStarted = ref(false);
+        const recordDisabled = ref(true);
 
         // 当前患者姓名
         const currentPatientName = computed(() => {
@@ -49,15 +148,10 @@ const app = createApp({
             return p ? p.name : '';
         });
 
-        // Vue 维护的词序列（与手语识别模块同步）
-        const vueWordSequence = ref([]);
-
-        // 返回场景选择
         const goToRoleSelect = () => {
             window.location.href = 'index.html';
         };
 
-        // 患者登录
         const patientLogin = async () => {
             if (!idCardInput.value.trim()) {
                 alert('请输入身份证号');
@@ -65,7 +159,6 @@ const app = createApp({
             }
             try {
                 const backendData = await patientLoginAPI(idCardInput.value.trim());
-
                 let patient = getPatientById(backendData.id);
                 if (!patient) {
                     patient = {
@@ -81,7 +174,6 @@ const app = createApp({
                     };
                     upsertPatient(patient);
                 }
-
                 setCurrentPatient(backendData);
                 currentId.value = backendData.id;
                 idCardInput.value = '';
@@ -96,12 +188,11 @@ const app = createApp({
             currentId.value = '';
             idCardInput.value = '';
             view.value = 'login';
-            // 关闭摄像头
-            if (camera) camera.stop();
-            cameraStarted = false;
+            agent.stopCamera();
+            cameraStarted.value = false;
+            recordDisabled.value = true;
         };
 
-        // 挂号大厅功能
         const quickAppointment = () => {
             const dept = prompt('请输入预约科室', '内科');
             if (dept) {
@@ -120,7 +211,6 @@ const app = createApp({
             alert('当前待缴费金额 ￥0.00，无欠费');
         };
 
-        // 进入手语分诊
         const goToSignTriage = () => {
             view.value = 'sign-triage';
         };
@@ -129,301 +219,45 @@ const app = createApp({
             view.value = 'reg-home';
         };
 
-        // ========== 手语识别函数 ==========
-        const initHolistic = () => {
-            holistic = new Holistic({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/holistic/${file}` });
-            holistic.setOptions({
-                modelComplexity: 1,
-                smoothLandmarks: true,
-                minDetectionConfidence: 0.3,
-                minTrackingConfidence: 0.3,
-                refineFaceLandmarks: false
-            });
-            holistic.onResults(onHolisticResults);
-        };
-
-        const onHolisticResults = (results) => {
-            canvas.width = webcam.videoWidth;
-            canvas.height = webcam.videoHeight;
-            ctx.save();
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-            ctx.drawImage(results.image, 0, 0);
-
-            // 绘制关节点
-            if (results.poseLandmarks) {
-                drawConnectors(ctx, results.poseLandmarks, POSE_CONNECTIONS, { color: '#00FF8866', lineWidth: 2 });
+        const startCamera = async () => {
+            try {
+                await agent.startCamera('webcam', 'canvas');
+                cameraStarted.value = true;
+                recordDisabled.value = false;
+                statusText.value = '就绪，可以开始比划了';
+                overlayText.value = '准备就绪';
+                overlayClass.value = 'overlay';
+            } catch (error) {
+                alert('摄像头启动失败: ' + error.message);
             }
-            if (results.leftHandLandmarks) {
-                drawConnectors(ctx, results.leftHandLandmarks, HAND_CONNECTIONS, { color: '#FF6B6B', lineWidth: 3 });
-                drawLandmarks(ctx, results.leftHandLandmarks, { color: '#FF6B6B', radius: 3 });
-            }
-            if (results.rightHandLandmarks) {
-                drawConnectors(ctx, results.rightHandLandmarks, HAND_CONNECTIONS, { color: '#4ECDC4', lineWidth: 3 });
-                drawLandmarks(ctx, results.rightHandLandmarks, { color: '#4ECDC4', radius: 3 });
-            }
-            ctx.restore();
-
-            if (isRecording) captureRawFrame();
-        };
-
-        const captureRawFrame = () => {
-            const now = Date.now();
-            if (now - lastCaptureTime < 33) return;
-            lastCaptureTime = now;
-            const tempCanvas = document.createElement('canvas');
-            tempCanvas.width = webcam.videoWidth;
-            tempCanvas.height = webcam.videoHeight;
-            tempCanvas.getContext('2d').drawImage(webcam, 0, 0);
-            framesBuffer.push(tempCanvas.toDataURL('image/jpeg', 0.8).split(',')[1]);
-            frameCountLocal++;
-            document.getElementById('statusText').textContent = `正在看... ${frameCountLocal}帧`;
-            document.getElementById('overlay').textContent = `录制: ${frameCountLocal}帧`;
-            document.getElementById('overlay').classList.add('recording');
         };
 
         const toggleRecording = () => {
-            const btn = document.getElementById('recordBtn');
-            if (!isRecording) {
-                isRecording = true;
-                framesBuffer = [];
-                frameCountLocal = 0;
-                lastCaptureTime = 0;
-                btn.textContent = '⏹ 停止';
-                btn.classList.add('btn-recording');
-                document.getElementById('statusText').textContent = '我在看着，请比划...';
-                clearCandidates();
-                clearPredictionBuffer();
-            } else {
-                isRecording = false;
+            if (agent.isRecording) {
+                agent.stopRecording();
+                const btn = document.getElementById('recordBtn');
                 btn.textContent = '⏺ 开始识别';
                 btn.classList.remove('btn-recording');
-                document.getElementById('overlay').classList.remove('recording');
-                document.getElementById('statusText').textContent = `正在理解... (${framesBuffer.length}帧)`;
-                document.getElementById('overlay').textContent = `处理 ${framesBuffer.length} 帧...`;
-                sendFramesToBackend();
-            }
-        };
-
-        const sendFramesToBackend = async () => {
-            if (framesBuffer.length < 5) {
-                document.getElementById('statusText').textContent = '时间有点短，请再比划一次 😊';
-                return;
-            }
-            const wordEl = document.getElementById('currentWord');
-            const confEl = document.getElementById('confidence');
-            wordEl.textContent = '请稍后...';
-            confEl.textContent = '正在识别中';
-            wordEl.style.color = 'var(--text-light)';
-            clearCandidates();
-            clearPredictionBuffer();
-
-            try {
-                const response = await fetch(`${API_URL}/recognize`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ frames: framesBuffer, confidence_threshold: 0.3, auto_add: false, trim_frames: 2 })
-                });
-                const result = await response.json();
-                wordEl.style.color = '';
-
-                if (result.success) {
-                    displayResult(result.prediction, result.confidence);
-                    document.getElementById('statusText').textContent = result.confidence >= 0.5 ? `看起来像是「${result.prediction}」，请确认 👇` : '不太确定，请帮我选择 👇';
-                    document.getElementById('overlay').textContent = result.prediction;
-                    if (result.top_predictions && result.top_predictions.length > 0) {
-                        displayTopCandidates(result.top_predictions);
-                    }
-                } else {
-                    document.getElementById('statusText').textContent = '抱歉，没能理解，请再试一次 😊';
-                    wordEl.textContent = '-';
-                    confEl.textContent = '-';
-                }
-            } catch (error) {
-                document.getElementById('statusText').textContent = '连接出了点问题';
-                wordEl.textContent = '-';
-                confEl.textContent = '-';
-                wordEl.style.color = '';
-            }
-        };
-
-        const displayResult = (prediction, confidence) => {
-            const wordEl = document.getElementById('currentWord');
-            const confEl = document.getElementById('confidence');
-            wordEl.style.color = '';
-            predictionBuffer.push(prediction);
-            if (predictionBuffer.length > BUFFER_SIZE) predictionBuffer.shift();
-            const counts = {};
-            let maxCount = 0, finalPrediction = prediction;
-            for (const p of predictionBuffer) {
-                counts[p] = (counts[p] || 0) + 1;
-                if (counts[p] > maxCount) {
-                    maxCount = counts[p];
-                    finalPrediction = p;
-                }
-            }
-            if (maxCount >= Math.ceil(BUFFER_SIZE / 2)) {
-                if (lastDisplayedPrediction !== finalPrediction) {
-                    wordEl.style.transform = 'scale(1.1)';
-                    setTimeout(() => { wordEl.style.transform = 'scale(1)'; }, 200);
-                    lastDisplayedPrediction = finalPrediction;
-                }
-                wordEl.textContent = finalPrediction;
-                confEl.textContent = `匹配度: ${(confidence * 100).toFixed(1)}%`;
             } else {
-                wordEl.textContent = `${prediction}?`;
-                confEl.textContent = `匹配度: ${(confidence * 100).toFixed(1)}% (分析中...)`;
+                agent.startRecording();
+                const btn = document.getElementById('recordBtn');
+                btn.textContent = '⏹ 停止';
+                btn.classList.add('btn-recording');
             }
         };
 
-        const displayTopCandidates = (topPredictions) => {
-            const list = document.getElementById('candidatesList');
-            clearAutoConfirmTimers();
-            if (!topPredictions || topPredictions.length === 0) {
-                list.innerHTML = '<span class="placeholder">暂无候选词</span>';
-                hideAutoConfirmHint();
-                return;
-            }
-            lastTopPredictions = topPredictions;
-            const top1Confidence = topPredictions[0].confidence;
-            list.innerHTML = '';
-
-            topPredictions.forEach((pred, index) => {
-                const btn = document.createElement('div');
-                btn.className = 'candidate-btn' + (index === 0 ? ' top1' : '');
-                btn.id = index === 0 ? 'top1Btn' : '';
-                btn.innerHTML = `<span class="rank">${pred.rank}</span><span class="label">${pred.label}</span><span class="conf">匹配 ${(pred.confidence * 100).toFixed(0)}%</span>`;
-                btn.onclick = () => confirmCandidate(pred.label, index);
-                list.appendChild(btn);
-            });
-            startAutoConfirmCountdown(topPredictions[0].label, top1Confidence);
+        const clearSequence = () => {
+            agent.clearSequence();
         };
 
-        const startAutoConfirmCountdown = (defaultLabel, confidence) => {
-            const hintEl = document.getElementById('autoConfirmHint');
-            const manualHintEl = document.getElementById('manualSelectHint');
-            const progressEl = document.getElementById('countdownProgress');
-            const top1Btn = document.getElementById('top1Btn');
-            hintEl.classList.add('hidden');
-            manualHintEl.classList.add('hidden');
-
-            let delayMs = 0, animationClass = '';
-            const HIGH_CONFIDENCE = 0.85;
-            const MID_CONFIDENCE = 0.50;
-            const HIGH_CONF_DELAY = 3000;
-            const MID_CONF_DELAY = 5000;
-
-            if (confidence >= HIGH_CONFIDENCE) {
-                delayMs = HIGH_CONF_DELAY;
-                animationClass = 'counting-3s';
-            } else if (confidence >= MID_CONFIDENCE) {
-                delayMs = MID_CONF_DELAY;
-                animationClass = 'counting-5s';
-            } else {
-                manualHintEl.classList.remove('hidden');
-                if (top1Btn) top1Btn.classList.remove('counting-3s', 'counting-5s');
-                return;
-            }
-
-            let countdownSeconds = Math.ceil(delayMs / 1000);
-            const totalSeconds = countdownSeconds;
-            document.querySelector('.countdown-text').innerHTML = `<span id="countdownNum">${countdownSeconds}</span>秒后自动确认`;
-            hintEl.classList.remove('hidden');
-            progressEl.style.transition = 'none';
-            progressEl.style.width = '100%';
-            if (top1Btn) {
-                top1Btn.classList.remove('counting-3s', 'counting-5s');
-                void top1Btn.offsetWidth;
-                top1Btn.classList.add(animationClass);
-            }
-
-            countdownTimer = setInterval(() => {
-                countdownSeconds--;
-                const numEl = document.getElementById('countdownNum');
-                if (numEl) numEl.textContent = countdownSeconds;
-                progressEl.style.transition = 'width 1s linear';
-                progressEl.style.width = (countdownSeconds / totalSeconds * 100) + '%';
-                if (countdownSeconds <= 0) clearInterval(countdownTimer);
-            }, 1000);
-            autoConfirmTimer = setTimeout(() => confirmCandidate(defaultLabel, 0, true), delayMs);
-        };
-
-        const clearAutoConfirmTimers = () => {
-            if (autoConfirmTimer) { clearTimeout(autoConfirmTimer); autoConfirmTimer = null; }
-            if (countdownTimer) { clearInterval(countdownTimer); countdownTimer = null; }
-            const top1Btn = document.getElementById('top1Btn');
-            if (top1Btn) top1Btn.classList.remove('counting-3s', 'counting-5s');
-        };
-
-        const hideAutoConfirmHint = () => {
-            document.getElementById('autoConfirmHint')?.classList.add('hidden');
-            document.getElementById('manualSelectHint')?.classList.add('hidden');
-        };
-
-        const clearCandidates = () => {
-            clearAutoConfirmTimers();
-            hideAutoConfirmHint();
-            document.getElementById('candidatesList').innerHTML = '<span class="placeholder">识别后会显示候选词供您选择</span>';
-            lastTopPredictions = [];
-        };
-
-        const clearPredictionBuffer = () => {
-            predictionBuffer = [];
-            lastDisplayedPrediction = null;
-        };
-
-        const confirmCandidate = async (label, index, isAuto = false) => {
-            clearAutoConfirmTimers();
-            hideAutoConfirmHint();
-            try {
-                const response = await fetch(`${API_URL}/confirm_word`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ label })
-                });
-                const result = await response.json();
-                if (result.success) {
-                    wordSequence = result.sequence;
-                    vueWordSequence.value = [...wordSequence];
-
-                    const wordEl = document.getElementById('currentWord');
-                    const confEl = document.getElementById('confidence');
-                    wordEl.textContent = label;
-                    confEl.textContent = '已确认 ✓';
-                    wordEl.style.color = 'var(--secondary-mint)';
-                    wordEl.style.transform = 'scale(1.1)';
-                    setTimeout(() => {
-                        wordEl.style.color = '';
-                        wordEl.style.transform = '';
-                    }, 300);
-                    clearCandidates();
-                    clearPredictionBuffer();
-                    document.getElementById('statusText').textContent = isAuto ? `✓ 已自动确认「${label}」` : `✓ 好的，已记录「${label}」`;
+        const polishSequence = async () => {
+            const result = await agent.polishSequence();
+            if (result) {
+                alert(`AI 整理结果：${result.polished}`);
+                if (result.triage) {
+                    alert(`分诊建议：${result.triage.department} - ${result.triage.advice}`);
                 }
-            } catch (error) {
-                alert('操作失败，请再试一次');
             }
-        };
-
-        // 摄像头启动
-        const startCamera = async () => {
-            if (cameraStarted) return;
-            webcam = document.getElementById('webcam');
-            canvas = document.getElementById('canvas');
-            ctx = canvas.getContext('2d');
-            initHolistic();
-            camera = new Camera(webcam, {
-                onFrame: async () => { await holistic.send({ image: webcam }); },
-                width: 640,
-                height: 480
-            });
-            await camera.start();
-            cameraStarted = true;
-            document.getElementById('startBtn').disabled = true;
-            document.getElementById('startBtn').textContent = '✓ 已开启';
-            document.getElementById('recordBtn').disabled = false;
-            document.getElementById('statusDot').classList.add('active');
-            document.getElementById('statusText').textContent = '就绪，可以开始比划了';
-            document.getElementById('overlay').textContent = '准备就绪';
         };
 
         // ========== 呼叫人工功能 ==========
@@ -431,17 +265,14 @@ const app = createApp({
             if (!text.trim() || !currentId.value) return;
             addMessage(currentId.value, { type: 'pat', content: text });
             alert('消息已发送给医生');
-            voiceText.value = ''; // 清空输入
+            voiceText.value = '';
             recognizedText.value = '';
         };
 
-        // 语音识别 - 修改：开始/停止切换，识别结果存入 recognizedText
         const toggleVoiceRecording = async () => {
             if (isRecordingVoice.value) {
-                // 停止录音
                 stopVoiceRecording();
             } else {
-                // 开始录音
                 await startVoiceRecording();
             }
         };
@@ -453,18 +284,17 @@ const app = createApp({
             }
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                mediaRecorder.value = new MediaRecorder(stream);
-                audioChunks.value = [];
-                mediaRecorder.value.ondataavailable = event => {
-                    audioChunks.value.push(event.data);
+                mediaRecorder = new MediaRecorder(stream);
+                audioChunks = [];
+                mediaRecorder.ondataavailable = event => {
+                    audioChunks.push(event.data);
                 };
-                mediaRecorder.value.onstop = () => {
-                    const audioBlob = new Blob(audioChunks.value, { type: 'audio/webm' });
+                mediaRecorder.onstop = () => {
+                    const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
                     sendVoiceToBackend(audioBlob);
-                    // 停止所有轨道
                     stream.getTracks().forEach(track => track.stop());
                 };
-                mediaRecorder.value.start();
+                mediaRecorder.start();
                 isRecordingVoice.value = true;
             } catch (error) {
                 alert('无法访问麦克风: ' + error.message);
@@ -472,8 +302,8 @@ const app = createApp({
         };
 
         const stopVoiceRecording = () => {
-            if (mediaRecorder.value && isRecordingVoice.value) {
-                mediaRecorder.value.stop();
+            if (mediaRecorder && isRecordingVoice.value) {
+                mediaRecorder.stop();
                 isRecordingVoice.value = false;
             }
         };
@@ -482,13 +312,12 @@ const app = createApp({
             const formData = new FormData();
             formData.append('audio', audioBlob);
             try {
-                const response = await fetch(`${API_URL}/speech-to-text`, {
+                const response = await fetch('http://localhost:5000/speech-to-text', {
                     method: 'POST',
                     body: formData
                 });
                 const result = await response.json();
                 if (result.success) {
-                    // 将识别结果存入临时文本，等待用户确认
                     recognizedText.value = result.text;
                 } else {
                     alert('语音识别失败');
@@ -498,57 +327,45 @@ const app = createApp({
             }
         };
 
-        // 确认语音识别结果
         const confirmVoiceText = () => {
             if (recognizedText.value.trim()) {
                 voiceText.value = recognizedText.value;
-                recognizedText.value = ''; // 清空临时区域
+                recognizedText.value = '';
             }
         };
 
-        // 取消语音识别结果
         const cancelVoiceText = () => {
             recognizedText.value = '';
         };
 
-        // 监听 iframe 消息（手语序列同步）
-        onMounted(() => {
-            window.addEventListener('message', (event) => {
-                const data = event.data;
-                if (data && data.type === 'wordConfirmed') {
-                    vueWordSequence.value.push(data.word);
-                }
-                if (data && data.type === 'sequenceUpdated') {
-                    vueWordSequence.value = data.sequence;
-                }
-            });
-        });
-
-        // 进入手语分诊时自动开启摄像头
         watch(view, (newVal) => {
             if (newVal === 'sign-triage') {
                 setTimeout(() => {
-                    if (!cameraStarted) {
+                    if (!cameraStarted.value) {
                         startCamera().catch(e => console.warn('摄像头启动失败', e));
                     }
                 }, 300);
             }
         });
 
+        onUnmounted(() => {
+            agent.stopCamera();
+            clearHeadGestureTimer();
+        });
+
         return {
             view, currentId, idCardInput, currentPatientName, vueWordSequence,
-            showChat,            // 新增侧边栏展开状态
+            showChat,
             isRecordingVoice, voiceText, recognizedText,
             goToRoleSelect, patientLogin, logout,
             quickAppointment, quickTakeNumber, quickPayment,
             goToSignTriage, goBack,
-            startCamera,
-            toggleRecording,
-            cameraStarted,
+            startCamera, toggleRecording, cameraStarted, recordDisabled,
+            currentWord, currentConfidence,
+            statusText, overlayText, overlayClass,
+            clearSequence, polishSequence,
             sendPatientMessage,
-            toggleVoiceRecording,
-            confirmVoiceText,
-            cancelVoiceText,
+            toggleVoiceRecording, confirmVoiceText, cancelVoiceText
         };
     },
     template: `
@@ -619,7 +436,7 @@ const app = createApp({
                 </div>
             </div>
 
-            <!-- 手语分诊页面 -->
+            <!-- 手语分诊页面 - 移除候选词列表，保留头部动作提示 -->
             <div v-if="view === 'sign-triage'" class="max-w-7xl mx-auto p-4">
                 <div class="bg-white rounded-3xl shadow-xl overflow-hidden">
                     <div class="bg-blue-600 p-4 text-white flex justify-between items-center">
@@ -634,7 +451,7 @@ const app = createApp({
                                 <div class="video-container relative">
                                     <video id="webcam" autoplay playsinline class="w-full rounded-lg"></video>
                                     <canvas id="canvas" class="absolute top-0 left-0 w-full h-full"></canvas>
-                                    <div class="overlay" id="overlay">等待开始...</div>
+                                    <div :class="overlayClass" id="overlay">{{ overlayText }}</div>
                                     <div class="detection-status absolute top-2 right-2 bg-white/90 p-2 rounded-lg text-xs hidden md:block">
                                         <div class="detection-item"><span class="detection-dot" id="poseDot"></span>身体</div>
                                         <div class="detection-item"><span class="detection-dot" id="leftHandDot"></span>左手</div>
@@ -646,45 +463,43 @@ const app = createApp({
                                     <button id="recordBtn" class="flex-1 bg-green-600 text-white py-2 rounded-lg hover:bg-green-700 disabled:opacity-50" :disabled="!cameraStarted" @click="toggleRecording">⏺ 开始识别</button>
                                 </div>
                                 <div class="status-bar flex items-center gap-2 mt-3 p-2 bg-gray-100 rounded-lg text-sm">
-                                    <span class="status-dot" id="statusDot"></span>
-                                    <span id="statusText">请先开启摄像头</span>
+                                    <span class="status-dot" :class="{'active': cameraStarted}" id="statusDot"></span>
+                                    <span id="statusText">{{ statusText }}</span>
                                 </div>
                                 <div class="tips-box mt-3 p-3 bg-blue-50 rounded-lg text-xs text-gray-600">
-                                    <strong>💡 小贴士：</strong> 光线充足、手部在胸前比划效果更好。
+                                    <strong>💡 小贴士：</strong> 光线充足、手部在胸前比划效果更好。识别后请面对摄像头做点头或摇头动作。
                                 </div>
                             </div>
-                            <!-- 右侧：结果区 + 侧边栏（人工帮助） -->
+
+                            <!-- 右侧：AI 交互区 + 语音识别区 -->
                             <div class="space-y-6">
-                                <!-- 识别结果卡片 -->
-                                <div class="bg-white rounded-2xl shadow-sm p-4">
-                                    <h2 class="text-lg font-bold mb-4 flex items-center gap-2">💬 识别结果</h2>
+                                <!-- AI 交互框 -->
+                                <div class="bg-white rounded-2xl shadow-sm p-4 border border-blue-100">
+                                    <h2 class="text-lg font-bold mb-4 flex items-center gap-2">🤖 AI 助手</h2>
+                                    <!-- 当前识别结果 -->
                                     <div class="current-word text-center p-6 bg-orange-50 rounded-xl mb-4">
-                                        <div class="label text-4xl font-bold text-orange-600" id="currentWord">-</div>
-                                        <div class="confidence text-sm text-gray-500 mt-2" id="confidence">-</div>
+                                        <div class="label text-4xl font-bold text-orange-600">{{ currentWord }}</div>
+                                        <div class="confidence text-sm text-gray-500 mt-2">{{ currentConfidence }}</div>
                                     </div>
-                                    <div class="top-candidates" id="topCandidates">
-                                        <h3 class="font-medium mb-3">🤔 您想表达的是这个意思吗？</h3>
-                                        <div class="candidates-list flex flex-wrap gap-2" id="candidatesList">
-                                            <span class="placeholder text-gray-400">识别后会显示候选词</span>
-                                        </div>
-                                        <div class="auto-confirm-hint hidden mt-3 p-2 bg-yellow-50 rounded-lg text-sm" id="autoConfirmHint">
-                                            <span class="countdown-text">若不选择，<span id="countdownNum">5</span>秒后自动确认</span>
-                                            <div class="countdown-bar h-1 bg-gray-200 mt-2 rounded overflow-hidden"><div class="countdown-progress h-full bg-green-500" id="countdownProgress" style="width:100%"></div></div>
-                                        </div>
-                                        <div class="manual-select-hint hidden mt-3 p-2 bg-red-50 rounded-lg text-sm" id="manualSelectHint">
-                                            <span>🙏 不太确定，请帮我选择正确的词</span>
-                                        </div>
-                                    </div>
+
+                                    <!-- 已确认的表达 -->
                                     <div class="sequence-section mt-4">
                                         <h3 class="font-medium mb-2">📝 已确认的表达</h3>
-                                        <div class="word-sequence flex flex-wrap gap-2 min-h-[50px] p-3 bg-gray-50 rounded-lg" id="wordSequence">
-                                            <span v-if="vueWordSequence.length === 0" class="placeholder text-gray-400">点击候选词确认</span>
-                                            <span v-for="(word, idx) in vueWordSequence" :key="idx" class="word-tag bg-green-100 px-3 py-1 rounded-full text-sm">{{ word }}</span>
+                                        <div class="word-sequence flex flex-wrap gap-2 min-h-[50px] p-3 bg-gray-50 rounded-lg">
+                                            <span v-if="vueWordSequence.length === 0" class="placeholder text-gray-400">通过手语识别后，点头确认添加</span>
+                                            <span v-for="(word, idx) in vueWordSequence" :key="idx" class="word-tag bg-green-100 px-3 py-1 rounded-full text-sm">
+                                                {{ word }}
+                                                <button @click="agent.deleteWord(idx)" class="ml-2 text-red-500 hover:text-red-700">&times;</button>
+                                            </span>
+                                        </div>
+                                        <div class="flex justify-end gap-2 mt-3">
+                                            <button @click="clearSequence" class="text-sm text-gray-500 hover:text-gray-700">清空</button>
+                                            <button @click="polishSequence" class="text-sm bg-indigo-50 text-indigo-600 px-3 py-1 rounded-full hover:bg-indigo-100">✨ 润色并分诊</button>
                                         </div>
                                     </div>
                                 </div>
 
-                                <!-- 人工帮助侧边栏（可折叠） -->
+                                <!-- 人工帮助侧边栏（语音输入） -->
                                 <div class="bg-white rounded-2xl shadow-sm p-4 transition-all duration-300">
                                     <div class="flex justify-between items-center cursor-pointer" @click="showChat = !showChat">
                                         <h3 class="font-bold text-lg flex items-center gap-2">
@@ -695,9 +510,7 @@ const app = createApp({
                                         </button>
                                     </div>
                                     <div v-show="showChat" class="mt-4 transition-all duration-300">
-                                        <!-- 输入框 -->
                                         <input v-model="voiceText" type="text" class="w-full border rounded-lg p-2 mb-2" placeholder="输入文字或使用语音...">
-                                        <!-- 语音识别临时结果区 -->
                                         <div v-if="recognizedText" class="mb-3 p-2 bg-yellow-50 border border-yellow-200 rounded-lg">
                                             <div class="text-sm text-gray-600 mb-2">识别结果：</div>
                                             <div class="flex items-center gap-2">
@@ -706,7 +519,6 @@ const app = createApp({
                                                 <button @click="cancelVoiceText" class="bg-gray-300 text-gray-700 px-3 py-1 rounded text-sm">取消</button>
                                             </div>
                                         </div>
-                                        <!-- 语音控制按钮 -->
                                         <div class="flex items-center gap-2 mb-3">
                                             <button @click="toggleVoiceRecording" 
                                                     :class="isRecordingVoice ? 'bg-red-500 hover:bg-red-600' : 'bg-green-500 hover:bg-green-600'"
@@ -716,7 +528,6 @@ const app = createApp({
                                             </button>
                                             <span v-if="isRecordingVoice" class="text-sm text-red-500 animate-pulse">录音中...</span>
                                         </div>
-                                        <!-- 发送按钮 -->
                                         <div class="flex justify-end">
                                             <button @click="sendPatientMessage(voiceText)" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700">
                                                 发送消息

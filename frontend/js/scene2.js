@@ -1,40 +1,173 @@
 import { createApp, ref, computed, onMounted, onUnmounted, watch } from 'vue';
-import { getPatients, getPatientById, upsertPatient, addMessage } from './services/patientService.js';
-import { validateDoctor, setCurrentDoctor, getCurrentDoctor, getCurrentDoctorDept, clearAuth } from './services/authService.js';
+import { getPatients, getPatientById, upsertPatient, addMessage, syncPatientsFromBackend } from './services/patientService.js';
+import { doctorLoginAPI, setCurrentDoctor, getCurrentDoctor, getCurrentDoctorDept, clearAuth } from './services/authService.js';
+import { SignLanguageAgent } from './services/signLanguageAgent.js';
 
 const app = createApp({
     setup() {
-        const doctorId = ref(getCurrentDoctor());
+        // ========== 原有状态 ==========
+        const storedDoctor = getCurrentDoctor();
+        const doctorId = ref(storedDoctor ? storedDoctor.id : '');
         const doctorPwd = ref('');
-        const view = ref(doctorId.value ? 'doctor-view' : 'login');
+        const view = ref(storedDoctor ? 'doctor-view' : 'login');
+        const loginLoading = ref(false);
+        const doctorDept = ref(storedDoctor ? (storedDoctor.dept || storedDoctor.department) : '');
+        const patients = ref([]);
+        const selectedPatientId = ref('');
 
-        // 当前医生的科室
-        const doctorDept = ref(getCurrentDoctorDept());
+        const showAddPrescription = ref(false);
+        const newRx = ref({ drug: '', dosage: '', usage: '' });
+        const selectedTerm = ref('');
+        const termExplanation = ref('');
+        const termDict = {
+            '心肌缺血': '指心脏肌肉供血不足，可能引发胸痛。',
+            '心律失常': '心跳节奏异常，可能过快、过慢或不规则。',
+            '高血压': '动脉血压持续偏高。',
+            '糖皮质激素': '一类抗炎药物，常用于过敏、哮喘等。',
+            'MRI': '磁共振成像，无辐射检查。'
+        };
+        const voiceInput = ref('');  // 医生语音消息（原有，保留）
 
-        const refreshKey = ref(0);
+        // ========== 新增：手语辅助窗口状态 ==========
+        const isHandsignOpen = ref(false);
+        let handsignWindow = null;
+        let windowCheckInterval = null;
 
+        // ========== 新增：医生语音转文字功能 ==========
+        const isRecordingVoiceForDoc = ref(false);
+        const doctorVoiceText = ref('');
+        const doctorRecognizedText = ref('');
+        let mediaRecorderDoc = null;
+        let audioChunksDoc = [];
+
+        // ========== 手语 agent（用于医生端？实际上新窗口独立使用，但为了保持代码一致保留） ==========
+        const agent = new SignLanguageAgent({
+            apiUrl: 'http://localhost:5000',
+            onResult: () => {},
+            onSequenceUpdate: () => {},
+            onStatusChange: () => {},
+            onHeadGesture: () => {}
+        });
+
+        // 医生语音转文字方法
+        const startDoctorVoiceRecording = async () => {
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                alert('您的浏览器不支持语音输入');
+                return;
+            }
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                mediaRecorderDoc = new MediaRecorder(stream);
+                audioChunksDoc = [];
+                mediaRecorderDoc.ondataavailable = event => {
+                    audioChunksDoc.push(event.data);
+                };
+                mediaRecorderDoc.onstop = () => {
+                    const audioBlob = new Blob(audioChunksDoc, { type: 'audio/webm' });
+                    sendVoiceToBackendForDoc(audioBlob);
+                    stream.getTracks().forEach(track => track.stop());
+                };
+                mediaRecorderDoc.start();
+                isRecordingVoiceForDoc.value = true;
+            } catch (error) {
+                alert('无法访问麦克风: ' + error.message);
+            }
+        };
+
+        const stopDoctorVoiceRecording = () => {
+            if (mediaRecorderDoc && isRecordingVoiceForDoc.value) {
+                mediaRecorderDoc.stop();
+                isRecordingVoiceForDoc.value = false;
+            }
+        };
+
+        const sendVoiceToBackendForDoc = async (audioBlob) => {
+            const formData = new FormData();
+            formData.append('audio', audioBlob);
+            try {
+                const response = await fetch('http://localhost:5000/speech-to-text', {
+                    method: 'POST',
+                    body: formData
+                });
+                const result = await response.json();
+                if (result.success) {
+                    doctorRecognizedText.value = result.text;
+                } else {
+                    alert('语音识别失败');
+                }
+            } catch (error) {
+                alert('语音识别服务连接失败');
+            }
+        };
+
+        const confirmDoctorVoiceText = () => {
+            if (doctorRecognizedText.value.trim()) {
+                doctorVoiceText.value = doctorRecognizedText.value;
+                doctorRecognizedText.value = '';
+            }
+        };
+
+        const cancelDoctorVoiceText = () => {
+            doctorRecognizedText.value = '';
+        };
+
+        const sendDoctorVoiceMessage = () => {
+            if (!doctorVoiceText.value.trim() || !selectedPatient.value) return;
+            addMessage(selectedPatient.value.id, { type: 'doc', content: doctorVoiceText.value });
+            doctorVoiceText.value = '';
+        };
+
+        // ========== 原有函数（医生登录、患者列表等）==========
         const goToRoleSelect = () => {
             window.location.href = 'index.html';
         };
 
-        // 患者列表（响应式）
-        const patients = ref([]);
-        const selectedPatientId = ref('');
+        const doctorLogin = async () => {
+            if (!doctorId.value || !doctorPwd.value) {
+                alert('工号和密码不能为空');
+                return;
+            }
+            loginLoading.value = true;
+            try {
+                const doctorData = await doctorLoginAPI(doctorId.value, doctorPwd.value);
+                setCurrentDoctor(doctorData);
+                doctorDept.value = getCurrentDoctorDept() || doctorData.dept || doctorData.department;
+                await syncPatientsFromBackend(doctorDept.value);
+                view.value = 'doctor-view';
+                loadPatients();
+                if (patients.value.length > 0) {
+                    selectedPatientId.value = patients.value[0].id;
+                } else {
+                    selectedPatientId.value = '';
+                }
+            } catch (error) {
+                alert(error.message || '登录失败，请检查工号或密码');
+            } finally {
+                loginLoading.value = false;
+            }
+        };
 
-        // 加载并过滤患者数据（只显示当前科室的患者）
+        const logout = () => {
+            clearAuth();
+            doctorId.value = '';
+            doctorPwd.value = '';
+            doctorDept.value = '';
+            view.value = 'login';
+            // 关闭手语辅助窗口
+            if (handsignWindow && !handsignWindow.closed) handsignWindow.close();
+            if (windowCheckInterval) clearInterval(windowCheckInterval);
+            isHandsignOpen.value = false;
+        };
+
         const loadPatients = () => {
             const allPatients = getPatients();
             if (doctorDept.value) {
                 patients.value = allPatients.filter(p => p.dept === doctorDept.value);
             } else {
-                patients.value = allPatients; // 如果没有科室（理论上不会），显示全部
+                patients.value = allPatients;
             }
         };
 
-        // 初始加载
-        loadPatients();
-
-        // 监听 storage 事件，重新加载患者列表
         const handleStorageChange = (e) => {
             if (e.key === 'smart_hospital_patients' || e.key === null) {
                 loadPatients();
@@ -47,63 +180,17 @@ const app = createApp({
 
         onUnmounted(() => {
             window.removeEventListener('storage', handleStorageChange);
+            if (windowCheckInterval) clearInterval(windowCheckInterval);
+            if (handsignWindow && !handsignWindow.closed) handsignWindow.close();
         });
 
         const selectedPatient = computed(() => {
             return patients.value.find(p => p.id === selectedPatientId.value) || null;
         });
 
-        // 医生登录
-        const doctorLogin = () => {
-            if (!doctorId.value || !doctorPwd.value) {
-                alert('工号和密码不能为空');
-                return;
-            }
-            if (validateDoctor(doctorId.value, doctorPwd.value)) {
-                setCurrentDoctor(doctorId.value);
-                // 更新科室
-                doctorDept.value = getCurrentDoctorDept();
-                view.value = 'doctor-view';
-                loadPatients(); // 重新加载（自动过滤）
-                if (patients.value.length > 0) {
-                    selectedPatientId.value = patients.value[0].id;
-                } else {
-                    selectedPatientId.value = ''; // 无患者
-                }
-            } else {
-                alert('工号或密码错误 (演示: d001/123)');
-            }
-        };
-
-        const logout = () => {
-            clearAuth();
-            doctorId.value = '';
-            doctorPwd.value = '';
-            doctorDept.value = '';
-            view.value = 'login';
-        };
-
         const selectPatient = (id) => {
             selectedPatientId.value = id;
         };
-
-        // 患者辅助页面状态
-        const isPatientSigning = ref(false);
-        const lastPatientSignText = ref('');
-        const selectedTerm = ref('');
-        const termExplanation = ref('');
-
-        const termDict = {
-            '心肌缺血': '指心脏肌肉供血不足，可能引发胸痛。',
-            '心律失常': '心跳节奏异常，可能过快、过慢或不规则。',
-            '高血压': '动脉血压持续偏高。',
-            '糖皮质激素': '一类抗炎药物，常用于过敏、哮喘等。',
-            'MRI': '磁共振成像，无辐射检查。'
-        };
-
-        const voiceInput = ref('');
-        const showAddPrescription = ref(false);
-        const newRx = ref({ drug: '', dosage: '', usage: '' });
 
         const saveMedicalHistory = () => {
             if (selectedPatient.value) {
@@ -130,41 +217,9 @@ const app = createApp({
             upsertPatient(selectedPatient.value);
         };
 
-        const sendVoiceMessage = () => {
-            if (!voiceInput.value.trim() || !selectedPatient.value) return;
-            addMessage(selectedPatient.value.id, { type: 'doc', content: voiceInput.value });
-            voiceInput.value = '';
-        };
-
-        const simulatePatientSignInput = () => {
-            if (isPatientSigning.value) return;
-            isPatientSigning.value = true;
-            lastPatientSignText.value = '';
-            setTimeout(() => {
-                const phrases = ["我有点头晕，想吐","这个地方疼（指着胸口）","昨晚没睡好，一直咳嗽","药吃完了，需要再开一点","医生，我血压高吗？"];
-                lastPatientSignText.value = phrases[Math.floor(Math.random() * phrases.length)];
-                isPatientSigning.value = false;
-            }, 2000);
-        };
-
-        const sendPatientSignMessage = () => {
-            if (!lastPatientSignText.value || !selectedPatient.value) return;
-            addMessage(selectedPatient.value.id, { type: 'pat', content: `[手语] ${lastPatientSignText.value}` });
-            lastPatientSignText.value = '';
-        };
-
         const queryTerm = (term) => {
             selectedTerm.value = term;
             termExplanation.value = termDict[term] || '暂无解释';
-        };
-
-        const openPatientAssist = () => {
-            if (!selectedPatient.value) return alert('请先选择一位患者');
-            view.value = 'patient-assist';
-        };
-
-        const backToDoctor = () => {
-            view.value = 'doctor-view';
         };
 
         const doctorMessagesForPatient = computed(() => {
@@ -172,21 +227,62 @@ const app = createApp({
             return selectedPatient.value.messages?.filter(m => m.type === 'doc').slice(-5) || [];
         });
 
+        const sendVoiceMessage = () => {
+            if (!voiceInput.value.trim() || !selectedPatient.value) return;
+            addMessage(selectedPatient.value.id, { type: 'doc', content: voiceInput.value });
+            voiceInput.value = '';
+        };
+
+        // ========== 手语辅助窗口打开逻辑 ==========
+        const openPatientAssist = () => {
+            if (!selectedPatient.value) return alert('请先选择一位患者');
+            if (handsignWindow && !handsignWindow.closed) {
+                handsignWindow.focus();
+                return;
+            }
+            const width = 1200;
+            const height = 800;
+            const left = (screen.width - width) / 2;
+            const top = (screen.height - height) / 2;
+            const features = `width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes`;
+            handsignWindow = window.open(`handsign_assist.html?patientId=${selectedPatient.value.id}&doctorId=${doctorId.value}`, 'handsign_assist', features);
+            if (handsignWindow) {
+                isHandsignOpen.value = true;
+                if (windowCheckInterval) clearInterval(windowCheckInterval);
+                windowCheckInterval = setInterval(() => {
+                    if (handsignWindow.closed) {
+                        clearInterval(windowCheckInterval);
+                        windowCheckInterval = null;
+                        isHandsignOpen.value = false;
+                        handsignWindow = null;
+                    }
+                }, 500);
+            }
+        };
+
+        // 为了兼容，保留一个空方法（原页面切换已废弃）
+        const backToDoctor = () => {};
+
         return {
-            view, doctorId, doctorPwd, doctorDept,
+            view, doctorId, doctorPwd, doctorDept, loginLoading,
             patients, selectedPatientId, selectedPatient,
-            isPatientSigning, lastPatientSignText, selectedTerm, termExplanation,
-            voiceInput, showAddPrescription, newRx,
-            doctorMessagesForPatient,
-            goToRoleSelect,
-            doctorLogin, logout, selectPatient,
-            saveMedicalHistory, addPrescription, removePrescription, sendVoiceMessage,
-            simulatePatientSignInput, sendPatientSignMessage, queryTerm,
-            openPatientAssist, backToDoctor
+            doctorMessagesForPatient, voiceInput,
+            selectedTerm, termExplanation,
+            showAddPrescription, newRx,
+            goToRoleSelect, doctorLogin, logout, selectPatient,
+            saveMedicalHistory, addPrescription, removePrescription,
+            sendVoiceMessage, openPatientAssist, backToDoctor,
+            queryTerm,
+            // 新增变量
+            isHandsignOpen,
+            // 医生语音转文字
+            doctorVoiceText, doctorRecognizedText, isRecordingVoiceForDoc,
+            startDoctorVoiceRecording, stopDoctorVoiceRecording,
+            confirmDoctorVoiceText, cancelDoctorVoiceText, sendDoctorVoiceMessage
         };
     },
     template: `
-        <!-- 医生登录 -->
+        <!-- 医生登录界面 -->
         <div v-if="view === 'login'" class="flex items-center justify-center min-h-screen">
             <div class="bg-white p-8 rounded-2xl shadow-2xl w-96">
                 <button @click="goToRoleSelect" class="text-sm text-blue-600 mb-4 flex items-center">← 返回场景选择</button>
@@ -198,12 +294,14 @@ const app = createApp({
                 </div>
                 <input v-model="doctorId" type="text" placeholder="工号" class="w-full border-2 border-gray-100 p-3 rounded-xl mb-3 focus:border-purple-500 outline-none">
                 <input v-model="doctorPwd" type="password" placeholder="密码" class="w-full border-2 border-gray-100 p-3 rounded-xl mb-5 focus:border-purple-500 outline-none">
-                <button @click="doctorLogin" class="w-full bg-purple-600 text-white py-3 rounded-xl font-bold hover:bg-purple-700">进入诊间</button>
-                <div class="text-xs text-gray-400 mt-4 text-center">演示账号: d001/123 (骨科), d002/456 (发热门诊)</div>
+                <button @click="doctorLogin" :disabled="loginLoading" class="w-full bg-purple-600 text-white py-3 rounded-xl font-bold hover:bg-purple-700 disabled:opacity-50">
+                    {{ loginLoading ? '登录中...' : '进入诊间' }}
+                </button>
+                <div class="text-xs text-gray-400 mt-4 text-center">演示账号: d001/123456 (骨科), d002/123456 (发热门诊)</div>
             </div>
         </div>
 
-        <!-- 导航栏 (登录后) -->
+        <!-- 导航栏（登录后） -->
         <nav v-else class="bg-white shadow-sm p-4 flex justify-between items-center px-8">
             <div class="flex items-center space-x-2">
                 <div class="w-8 h-8 bg-purple-600 rounded-lg flex items-center justify-center text-white font-bold">+</div>
@@ -217,7 +315,6 @@ const app = createApp({
 
         <!-- 医生工作区主界面 -->
         <div v-if="view === 'doctor-view'" class="max-w-7xl mx-auto p-6 grid grid-cols-12 gap-6">
-            <!-- 患者列表侧边栏 -->
             <div class="col-span-3 bg-white rounded-2xl shadow-sm p-4 h-fit">
                 <h3 class="font-bold border-b pb-4 mb-4">待诊患者 ({{ patients.length }}) <span class="text-sm font-normal text-gray-500 ml-2">{{ doctorDept }}</span></h3>
                 <div v-if="patients.length === 0" class="text-gray-400 text-center py-4">暂无本科室患者</div>
@@ -230,16 +327,13 @@ const app = createApp({
                     </div>
                 </div>
             </div>
-
-            <!-- 右侧主工作区 -->
             <div class="col-span-9 space-y-6" v-if="selectedPatient">
-                <!-- 患者概要卡片 -->
                 <div class="bg-white p-6 rounded-2xl shadow-sm border-t-4 border-blue-600">
                     <div class="flex flex-wrap justify-between items-start gap-4 mb-4">
                         <div>
                             <h2 class="text-xl font-bold flex items-center gap-2">
                                 当前患者：{{ selectedPatient.name }}
-                                <span class="bg-blue-100 text-blue-600 px-3 py-1 rounded text-sm">手语辅助已开启</span>
+                                <span v-if="isHandsignOpen" class="bg-green-100 text-green-600 px-3 py-1 rounded text-sm">手语辅助已开启</span>
                             </h2>
                             <p class="text-sm text-gray-500">ID: {{ selectedPatient.id }} | 科室: {{ selectedPatient.dept }}</p>
                         </div>
@@ -251,11 +345,9 @@ const app = createApp({
                     <div class="grid grid-cols-3 gap-4 text-sm mb-2">
                         <div class="bg-slate-50 p-3 rounded-lg"><span class="text-gray-400 block">主诉/症状：</span><span class="font-medium text-blue-700">{{ selectedPatient.symptoms || '未记录' }}</span></div>
                         <div class="bg-slate-50 p-3 rounded-lg"><span class="text-gray-400 block">过敏史：</span><span class="font-medium text-red-600">{{ selectedPatient.allergy || '不详' }}</span></div>
-                        <div class="bg-slate-50 p-3 rounded-lg"><span class="text-gray-400 block">年龄/性别：</span><span class="font-medium">{{ selectedPatient.age ? selectedPatient.age + '岁' : '?' }} / {{ selectedPatient.gender || '?' }}</span></div>
+                        <div class="bg-slate-50 p-3 rounded-lg"><span class="text-gray-400 block">年龄/性别：</span><span class="font-medium">{{ selectedPatient.age ? selectedPatient.age + '岁' : '?' }} / {{ selectedPatient.genderText || '?' }}</span></div>
                     </div>
                 </div>
-
-                <!-- 病历记录 -->
                 <div class="bg-white p-6 rounded-2xl shadow-sm">
                     <div class="flex justify-between items-center mb-3">
                         <h3 class="font-bold text-lg flex items-center gap-2"><span class="w-1.5 h-5 bg-blue-500 rounded-full"></span>病历记录</h3>
@@ -263,8 +355,6 @@ const app = createApp({
                     </div>
                     <textarea v-model="selectedPatient.medicalHistory" rows="3" class="w-full border border-gray-200 rounded-xl p-3 text-sm focus:ring-2 focus:ring-blue-200 outline-none" placeholder="输入诊断..."></textarea>
                 </div>
-
-                <!-- 处方管理 -->
                 <div class="bg-white p-6 rounded-2xl shadow-sm">
                     <div class="flex justify-between items-center mb-3">
                         <h3 class="font-bold text-lg flex items-center gap-2"><span class="w-1.5 h-5 bg-green-500 rounded-full"></span>处方管理</h3>
@@ -293,77 +383,40 @@ const app = createApp({
                         </div>
                     </div>
                 </div>
+
+                <!-- 新增：医生语音转文字区域，仅在手语辅助窗口打开时显示 -->
+                <div v-if="isHandsignOpen" class="bg-white p-6 rounded-2xl shadow-sm mt-4">
+                    <div class="flex justify-between items-center mb-3">
+                        <h3 class="font-bold text-lg flex items-center gap-2"><span class="w-1.5 h-5 bg-purple-500 rounded-full"></span>医生语音转文字</h3>
+                    </div>
+                    <div>
+                        <input v-model="doctorVoiceText" type="text" placeholder="输入文字或使用语音..." class="w-full border rounded-lg p-2 mb-2">
+                        <div v-if="doctorRecognizedText" class="mb-3 p-2 bg-yellow-50 border border-yellow-200 rounded-lg">
+                            <div class="text-sm text-gray-600 mb-2">识别结果：</div>
+                            <div class="flex items-center gap-2">
+                                <span class="flex-1 text-gray-800">{{ doctorRecognizedText }}</span>
+                                <button @click="confirmDoctorVoiceText" class="bg-green-500 text-white px-3 py-1 rounded text-sm">确认</button>
+                                <button @click="cancelDoctorVoiceText" class="bg-gray-300 text-gray-700 px-3 py-1 rounded text-sm">取消</button>
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-2 mb-3">
+                            <button @click="isRecordingVoiceForDoc ? stopDoctorVoiceRecording() : startDoctorVoiceRecording()" 
+                                    :class="isRecordingVoiceForDoc ? 'bg-red-500 hover:bg-red-600' : 'bg-green-500 hover:bg-green-600'"
+                                    class="text-white px-4 py-2 rounded-lg text-sm flex items-center gap-1 transition-colors">
+                                <span v-if="!isRecordingVoiceForDoc">🎤 开始语音</span>
+                                <span v-else>⏹ 停止录音</span>
+                            </button>
+                            <span v-if="isRecordingVoiceForDoc" class="text-sm text-red-500 animate-pulse">录音中...</span>
+                        </div>
+                        <div class="flex justify-end">
+                            <button @click="sendDoctorVoiceMessage" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700">
+                                发送给患者
+                            </button>
+                        </div>
+                    </div>
+                </div>
             </div>
             <div v-else class="col-span-9 bg-white rounded-2xl shadow-sm p-12 text-center text-gray-400">请从左侧选择一个患者开始就诊</div>
-        </div>
-
-        <!-- 患者辅助页面 (保持不变) -->
-        <div v-if="view === 'patient-assist'" class="max-w-6xl mx-auto p-6">
-            <div class="bg-white rounded-3xl shadow-xl overflow-hidden">
-                <div class="bg-indigo-600 p-4 text-white flex justify-between items-center">
-                    <span class="font-bold flex items-center gap-2">
-                        <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path d="M10 12a2 2 0 100-4 2 2 0 000 4z"></path><path fill-rule="evenodd" d="M.458 10C1.732 5.943 5.522 3 10 3s8.268 2.943 9.542 7c-1.274 4.057-5.064 7-9.542 7S1.732 14.057.458 10zM14 10a4 4 0 11-8 0 4 4 0 018 0z" clip-rule="evenodd"></path></svg>
-                        患者手语辅助 · {{ selectedPatient?.name }}
-                    </span>
-                    <button @click="backToDoctor" class="text-sm bg-white/20 px-4 py-1 rounded-full hover:bg-white/30">返回诊间</button>
-                </div>
-
-                <div class="grid md:grid-cols-2 gap-6 p-6">
-                    <!-- 左侧手语区 -->
-                    <div class="space-y-4">
-                        <div class="camera-preview h-48">
-                            <div class="scan-line" v-if="isPatientSigning"></div>
-                            <div class="absolute inset-0 flex items-center justify-center">
-                                <span v-if="!isPatientSigning" class="text-gray-500">点击下方按钮开始手语</span>
-                                <div v-else class="text-center">
-                                    <div class="w-12 h-12 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin mx-auto mb-2"></div>
-                                    <span class="text-indigo-400 text-sm">手语翻译中...</span>
-                                </div>
-                            </div>
-                        </div>
-                        <button @click="simulatePatientSignInput" :disabled="isPatientSigning" class="w-full bg-indigo-600 text-white py-3 rounded-xl font-bold disabled:opacity-50">
-                            {{ isPatientSigning ? '翻译中...' : '开始手语输入' }}
-                        </button>
-                        <div class="bg-slate-50 p-4 rounded-2xl border border-slate-200">
-                            <h4 class="text-xs font-bold text-gray-400 uppercase mb-1">最新手语转写</h4>
-                            <p class="text-lg">{{ lastPatientSignText || '暂无' }}</p>
-                        </div>
-                    </div>
-
-                    <!-- 右侧医生语音 + AI词典 -->
-                    <div class="space-y-4">
-                        <div class="bg-blue-50 p-4 rounded-2xl border border-blue-200">
-                            <div class="flex justify-between items-center mb-2">
-                                <h4 class="text-xs font-bold text-blue-600 uppercase">👨‍⚕️ 医生语音</h4>
-                                <span class="text-xs text-gray-400">最新{{ doctorMessagesForPatient.length }}条</span>
-                            </div>
-                            <div class="space-y-2 max-h-40 overflow-y-auto">
-                                <div v-for="(msg, idx) in doctorMessagesForPatient" :key="idx" class="bg-white p-2 rounded-lg text-sm border-l-4 border-blue-400">{{ msg.content }}</div>
-                                <div v-if="doctorMessagesForPatient.length === 0" class="text-gray-400 text-sm">暂无医生消息</div>
-                            </div>
-                        </div>
-
-                        <div class="bg-purple-50 p-4 rounded-2xl border border-purple-200">
-                            <h4 class="text-xs font-bold text-purple-600 uppercase mb-2">🤖 AI 医学词典</h4>
-                            <p class="text-sm text-gray-600 mb-2">点击词语查看解释：</p>
-                            <div class="flex flex-wrap gap-2 mb-3">
-                                <span class="term-tag" @click="queryTerm('心肌缺血')">心肌缺血</span>
-                                <span class="term-tag" @click="queryTerm('心律失常')">心律失常</span>
-                                <span class="term-tag" @click="queryTerm('高血压')">高血压</span>
-                                <span class="term-tag" @click="queryTerm('糖皮质激素')">糖皮质激素</span>
-                                <span class="term-tag" @click="queryTerm('MRI')">MRI</span>
-                            </div>
-                            <div v-if="selectedTerm" class="bg-white p-3 rounded-lg border border-purple-300 text-sm">
-                                <span class="font-bold text-purple-700">{{ selectedTerm }}:</span> {{ termExplanation }}
-                            </div>
-                        </div>
-
-                        <button @click="sendPatientSignMessage" :disabled="!lastPatientSignText" class="w-full bg-green-600 text-white py-3 rounded-xl font-bold disabled:opacity-50">
-                            发送手语内容给医生
-                        </button>
-                    </div>
-                </div>
-            </div>
         </div>
     `
 });

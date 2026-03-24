@@ -1,7 +1,8 @@
 // 基于 localStorage 的患者数据管理
 const STORAGE_KEY = 'smart_hospital_patients';
+const API_BASE_URL = 'http://localhost:8000/api';
 
-// 默认初始患者数据
+// 默认初始患者数据（仅作为后备，实际会被后端数据覆盖）
 const DEFAULT_PATIENTS = [
     {
         id: 'P001', name: '张三', isDeaf: true,
@@ -33,7 +34,52 @@ const DEFAULT_PATIENTS = [
     }
 ];
 
-// 初始化数据
+/**
+ * 计算年龄（基于出生日期）
+ */
+function calculateAge(birthDateStr) {
+    if (!birthDateStr) return null;
+    const birth = new Date(birthDateStr);
+    const today = new Date();
+    let age = today.getFullYear() - birth.getFullYear();
+    const m = today.getMonth() - birth.getMonth();
+    if (m < 0 || (m === 0 && today.getDate() < birth.getDate())) {
+        age--;
+    }
+    return age;
+}
+
+/**
+ * 标准化患者数据：添加 age、genderText、dept 等字段
+ */
+function normalizePatient(patient) {
+    return {
+        ...patient,
+        age: calculateAge(patient.birth_date),
+        genderText: patient.gender === 1 ? '男' : (patient.gender === 0 ? '女' : '未知'),
+        dept: patient.dept || patient.department || '',
+        isDeaf: patient.is_deaf,
+        allergy: patient.allergy_history,
+    };
+}
+
+// 从后端获取患者列表并更新本地存储
+async function syncPatientsFromBackend(dept = null) {
+    let url = `${API_BASE_URL}/patients`;
+    if (dept) {
+        url += `?dept=${encodeURIComponent(dept)}`;
+    }
+    const response = await fetch(url);
+    if (!response.ok) {
+        throw new Error(`获取患者列表失败: ${response.status}`);
+    }
+    const rawPatients = await response.json();
+    const standardized = rawPatients.map(normalizePatient);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(standardized));
+    return standardized;
+}
+
+// 初始化本地数据（若本地无数据则使用默认）
 function initPatients() {
     if (!localStorage.getItem(STORAGE_KEY)) {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(DEFAULT_PATIENTS));
@@ -49,7 +95,7 @@ function getPatients() {
 // 根据ID获取患者
 function getPatientById(id) {
     const patients = getPatients();
-    return patients.find(p => p.id === id) || null;
+    return patients.find(p => p.id == id) || null;
 }
 
 // 保存患者列表
@@ -60,7 +106,7 @@ function savePatients(patients) {
 // 添加或更新患者
 function upsertPatient(patient) {
     const patients = getPatients();
-    const index = patients.findIndex(p => p.id === patient.id);
+    const index = patients.findIndex(p => p.id == patient.id);
     if (index >= 0) {
         patients[index] = { ...patients[index], ...patient };
     } else {
@@ -82,4 +128,11 @@ function addMessage(patientId, message) {
     }
 }
 
-export { getPatients, getPatientById, upsertPatient, addMessage };
+// 统一导出（这里只导出一次，避免重复）
+export {
+    getPatients,
+    getPatientById,
+    upsertPatient,
+    addMessage,
+    syncPatientsFromBackend
+};
