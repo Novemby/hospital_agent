@@ -31,8 +31,8 @@ const app = createApp({
         const view = ref(currentId.value ? 'reg-home' : 'login');
         const refreshKey = ref(0);
 
-        // 模态框显示状态
-        const showCallModal = ref(false);
+        // 侧边栏展开状态
+        const showChat = ref(false);
 
         // 语音输入相关
         const isRecordingVoice = ref(false);
@@ -431,8 +431,8 @@ const app = createApp({
             if (!text.trim() || !currentId.value) return;
             addMessage(currentId.value, { type: 'pat', content: text });
             alert('消息已发送给医生');
-            showCallModal.value = false;
             voiceText.value = ''; // 清空输入
+            recognizedText.value = '';
         };
 
         // 语音识别 - 修改：开始/停止切换，识别结果存入 recognizedText
@@ -535,43 +535,9 @@ const app = createApp({
             }
         });
 
-        // 可拖动模态框相关
-        const modalPosition = ref({ x: 0, y: 0 });
-        const dragging = ref(false);
-        const dragOffset = ref({ x: 0, y: 0 });
-        const modalRef = ref(null);
-
-        const startDrag = (e) => {
-            e.preventDefault();
-            const modal = modalRef.value;
-            if (!modal) return;
-            const rect = modal.getBoundingClientRect();
-            dragOffset.value = {
-                x: e.clientX - rect.left,
-                y: e.clientY - rect.top
-            };
-            dragging.value = true;
-            document.addEventListener('mousemove', onDrag);
-            document.addEventListener('mouseup', stopDrag);
-        };
-
-        const onDrag = (e) => {
-            if (!dragging.value) return;
-            modalPosition.value = {
-                x: e.clientX - dragOffset.value.x,
-                y: e.clientY - dragOffset.value.y
-            };
-        };
-
-        const stopDrag = () => {
-            dragging.value = false;
-            document.removeEventListener('mousemove', onDrag);
-            document.removeEventListener('mouseup', stopDrag);
-        };
-
         return {
             view, currentId, idCardInput, currentPatientName, vueWordSequence,
-            showCallModal,
+            showChat,            // 新增侧边栏展开状态
             isRecordingVoice, voiceText, recognizedText,
             goToRoleSelect, patientLogin, logout,
             quickAppointment, quickTakeNumber, quickPayment,
@@ -583,9 +549,6 @@ const app = createApp({
             toggleVoiceRecording,
             confirmVoiceText,
             cancelVoiceText,
-            modalPosition,
-            modalRef,
-            startDrag
         };
     },
     template: `
@@ -690,89 +653,78 @@ const app = createApp({
                                     <strong>💡 小贴士：</strong> 光线充足、手部在胸前比划效果更好。
                                 </div>
                             </div>
-                            <!-- 右侧：结果区 -->
-                            <div class="bg-white rounded-2xl shadow-sm p-4">
-                                <h2 class="text-lg font-bold mb-4 flex items-center gap-2">💬 识别结果</h2>
-                                <div class="current-word text-center p-6 bg-orange-50 rounded-xl mb-4">
-                                    <div class="label text-4xl font-bold text-orange-600" id="currentWord">-</div>
-                                    <div class="confidence text-sm text-gray-500 mt-2" id="confidence">-</div>
+                            <!-- 右侧：结果区 + 侧边栏（人工帮助） -->
+                            <div class="space-y-6">
+                                <!-- 识别结果卡片 -->
+                                <div class="bg-white rounded-2xl shadow-sm p-4">
+                                    <h2 class="text-lg font-bold mb-4 flex items-center gap-2">💬 识别结果</h2>
+                                    <div class="current-word text-center p-6 bg-orange-50 rounded-xl mb-4">
+                                        <div class="label text-4xl font-bold text-orange-600" id="currentWord">-</div>
+                                        <div class="confidence text-sm text-gray-500 mt-2" id="confidence">-</div>
+                                    </div>
+                                    <div class="top-candidates" id="topCandidates">
+                                        <h3 class="font-medium mb-3">🤔 您想表达的是这个意思吗？</h3>
+                                        <div class="candidates-list flex flex-wrap gap-2" id="candidatesList">
+                                            <span class="placeholder text-gray-400">识别后会显示候选词</span>
+                                        </div>
+                                        <div class="auto-confirm-hint hidden mt-3 p-2 bg-yellow-50 rounded-lg text-sm" id="autoConfirmHint">
+                                            <span class="countdown-text">若不选择，<span id="countdownNum">5</span>秒后自动确认</span>
+                                            <div class="countdown-bar h-1 bg-gray-200 mt-2 rounded overflow-hidden"><div class="countdown-progress h-full bg-green-500" id="countdownProgress" style="width:100%"></div></div>
+                                        </div>
+                                        <div class="manual-select-hint hidden mt-3 p-2 bg-red-50 rounded-lg text-sm" id="manualSelectHint">
+                                            <span>🙏 不太确定，请帮我选择正确的词</span>
+                                        </div>
+                                    </div>
+                                    <div class="sequence-section mt-4">
+                                        <h3 class="font-medium mb-2">📝 已确认的表达</h3>
+                                        <div class="word-sequence flex flex-wrap gap-2 min-h-[50px] p-3 bg-gray-50 rounded-lg" id="wordSequence">
+                                            <span v-if="vueWordSequence.length === 0" class="placeholder text-gray-400">点击候选词确认</span>
+                                            <span v-for="(word, idx) in vueWordSequence" :key="idx" class="word-tag bg-green-100 px-3 py-1 rounded-full text-sm">{{ word }}</span>
+                                        </div>
+                                    </div>
                                 </div>
-                                <div class="top-candidates" id="topCandidates">
-                                    <h3 class="font-medium mb-3">🤔 您想表达的是这个意思吗？</h3>
-                                    <div class="candidates-list flex flex-wrap gap-2" id="candidatesList">
-                                        <span class="placeholder text-gray-400">识别后会显示候选词</span>
+
+                                <!-- 人工帮助侧边栏（可折叠） -->
+                                <div class="bg-white rounded-2xl shadow-sm p-4 transition-all duration-300">
+                                    <div class="flex justify-between items-center cursor-pointer" @click="showChat = !showChat">
+                                        <h3 class="font-bold text-lg flex items-center gap-2">
+                                            <span>📞</span> 人工帮助
+                                        </h3>
+                                        <button class="text-blue-600 text-sm hover:underline">
+                                            {{ showChat ? '收起 ▲' : '展开 ▼' }}
+                                        </button>
                                     </div>
-                                    <div class="auto-confirm-hint hidden mt-3 p-2 bg-yellow-50 rounded-lg text-sm" id="autoConfirmHint">
-                                        <span class="countdown-text">若不选择，<span id="countdownNum">5</span>秒后自动确认</span>
-                                        <div class="countdown-bar h-1 bg-gray-200 mt-2 rounded overflow-hidden"><div class="countdown-progress h-full bg-green-500" id="countdownProgress" style="width:100%"></div></div>
-                                    </div>
-                                    <div class="manual-select-hint hidden mt-3 p-2 bg-red-50 rounded-lg text-sm" id="manualSelectHint">
-                                        <span>🙏 不太确定，请帮我选择正确的词</span>
-                                    </div>
-                                </div>
-                                <div class="sequence-section mt-4">
-                                    <h3 class="font-medium mb-2">📝 已确认的表达</h3>
-                                    <div class="word-sequence flex flex-wrap gap-2 min-h-[50px] p-3 bg-gray-50 rounded-lg" id="wordSequence">
-                                        <span v-if="vueWordSequence.length === 0" class="placeholder text-gray-400">点击候选词确认</span>
-                                        <span v-for="(word, idx) in vueWordSequence" :key="idx" class="word-tag bg-green-100 px-3 py-1 rounded-full text-sm">{{ word }}</span>
+                                    <div v-show="showChat" class="mt-4 transition-all duration-300">
+                                        <!-- 输入框 -->
+                                        <input v-model="voiceText" type="text" class="w-full border rounded-lg p-2 mb-2" placeholder="输入文字或使用语音...">
+                                        <!-- 语音识别临时结果区 -->
+                                        <div v-if="recognizedText" class="mb-3 p-2 bg-yellow-50 border border-yellow-200 rounded-lg">
+                                            <div class="text-sm text-gray-600 mb-2">识别结果：</div>
+                                            <div class="flex items-center gap-2">
+                                                <span class="flex-1 text-gray-800">{{ recognizedText }}</span>
+                                                <button @click="confirmVoiceText" class="bg-green-500 text-white px-3 py-1 rounded text-sm">确认</button>
+                                                <button @click="cancelVoiceText" class="bg-gray-300 text-gray-700 px-3 py-1 rounded text-sm">取消</button>
+                                            </div>
+                                        </div>
+                                        <!-- 语音控制按钮 -->
+                                        <div class="flex items-center gap-2 mb-3">
+                                            <button @click="toggleVoiceRecording" 
+                                                    :class="isRecordingVoice ? 'bg-red-500 hover:bg-red-600' : 'bg-green-500 hover:bg-green-600'"
+                                                    class="text-white px-4 py-2 rounded-lg text-sm flex items-center gap-1 transition-colors">
+                                                <span v-if="!isRecordingVoice">🎤 开始语音</span>
+                                                <span v-else>⏹ 停止录音</span>
+                                            </button>
+                                            <span v-if="isRecordingVoice" class="text-sm text-red-500 animate-pulse">录音中...</span>
+                                        </div>
+                                        <!-- 发送按钮 -->
+                                        <div class="flex justify-end">
+                                            <button @click="sendPatientMessage(voiceText)" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700">
+                                                发送消息
+                                            </button>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- 呼叫浮窗按钮 (仅在手语辅助界面显示) -->
-            <button v-if="view === 'sign-triage'" 
-                    class="fixed bottom-8 right-8 bg-red-600 hover:bg-red-700 text-white rounded-full shadow-2xl flex items-center gap-2 px-6 py-4 z-50"
-                    @click="showCallModal = true">
-                <span class="text-2xl">🎤</span>
-                <span class="font-bold text-lg">呼叫人工</span>
-            </button>
-
-            <!-- 呼叫模态框 (可拖动，含语音输入及确认) -->
-            <div v-if="showCallModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 modal-overlay" @click.self="showCallModal = false">
-                <div ref="modalRef" class="bg-white rounded-2xl shadow-2xl overflow-hidden w-96"
-                     :style="{ transform: 'translate(' + modalPosition.x + 'px, ' + modalPosition.y + 'px)' }">
-                    <!-- 拖动标题栏 -->
-                    <div class="p-3 bg-blue-600 text-white cursor-move flex justify-between items-center" @mousedown="startDrag">
-                        <span class="font-bold flex items-center gap-2">
-                            <span>🎤</span> 呼叫人工
-                        </span>
-                        <button @click="showCallModal = false" class="text-white hover:text-red-200 text-xl">&times;</button>
-                    </div>
-            
-                    <!-- 输入区域 -->
-                    <div class="p-4">
-                        <!-- 最终输入框（用户确认后的文本） -->
-                        <input v-model="voiceText" type="text" class="w-full border rounded-lg p-2 mb-3" placeholder="输入文字或使用语音输入...">
-                        
-                        <!-- 语音识别临时结果及确认区 -->
-                        <div v-if="recognizedText" class="mb-3 p-2 bg-yellow-50 border border-yellow-200 rounded-lg">
-                            <div class="text-sm text-gray-600 mb-2">识别结果：</div>
-                            <div class="flex items-center gap-2">
-                                <span class="flex-1 text-gray-800">{{ recognizedText }}</span>
-                                <button @click="confirmVoiceText" class="bg-green-500 text-white px-3 py-1 rounded text-sm">确认</button>
-                                <button @click="cancelVoiceText" class="bg-gray-300 text-gray-700 px-3 py-1 rounded text-sm">取消</button>
-                            </div>
-                        </div>
-
-                        <!-- 语音控制按钮 -->
-                        <div class="flex items-center gap-2 mb-3">
-                            <button @click="toggleVoiceRecording" 
-                                    :class="isRecordingVoice ? 'bg-red-500 hover:bg-red-600' : 'bg-green-500 hover:bg-green-600'"
-                                    class="text-white px-4 py-2 rounded-lg text-sm flex items-center gap-1 transition-colors">
-                                <span v-if="!isRecordingVoice">🎤 开始语音</span>
-                                <span v-else>⏹ 停止录音</span>
-                            </button>
-                            <span v-if="isRecordingVoice" class="text-sm text-red-500 animate-pulse">录音中...</span>
-                        </div>
-
-                        <!-- 操作按钮 -->
-                        <div class="flex justify-end gap-2">
-                            <button @click="showCallModal = false" class="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg">取消</button>
-                            <button @click="sendPatientMessage(voiceText)" class="bg-blue-600 text-white px-4 py-2 rounded-lg">发送</button>
                         </div>
                     </div>
                 </div>

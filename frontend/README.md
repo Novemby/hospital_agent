@@ -1,7 +1,7 @@
 ## 结构目录
-project/
-├── index.html                  # 场景选择入口（新）
-├── reg.html                    # 挂号场景（原 index.html 重命名）
+frontend/
+├── index.html                  # 场景选择入口
+├── reg.html                    # 挂号场景
 ├── scene2.html                 # 就诊场景
 ├── scene3.html                 # 我的场景
 ├── css/
@@ -21,5 +21,5 @@ project/
 └── assets/                     # 静态资源（空）
 
 ## 使用方法
-# 在命令行输入 python -m http.server 8000
-# 浏览器访问 http://localhost:8000/index.html
+# 在命令行输入 python -m http.server 8001
+# 浏览器访问 http://localhost:8001/index.html

@@ -15,6 +15,7 @@
 ```bash
 mysql -u root -p < db/init.sql
 ```
+# 先在“服务”启动mysql
 
 随后请在 `backend/database.py` 中确认数据库账号与密码。如下所示：
 SQLALCHEMY_DATABASE_URL = "mysql+pymysql://[填入账号]:[填入密码]@localhost:3306/medical_agent_db?charset=utf8mb4"
@@ -32,10 +33,12 @@ cd E:\hospital_sys
 ```bash
 uvicorn backend.main:app --reload --port 8000
 ```
+# python -m uvicorn backend.main:app --reload --port 8000
 
 3. 验证接口是否正常：
 
-打开 `http://127.0.0.1:8000/docs`，应看到以下接口：
+打开 `http://127.0.0.1:8000/docs`
+应看到以下接口：
 
 - `POST /api/doctors/login`
 - `GET /api/patients/by-idcard/{id_card}`
@@ -56,9 +59,9 @@ python -m http.server 8001
 
 3. 用浏览器打开：
 
-```
-http://localhost:8001/index.html
-```
+
+'http://localhost:8001/index.html'
+
 
 ## 前后端联调说明
 

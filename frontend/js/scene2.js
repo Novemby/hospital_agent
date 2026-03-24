@@ -1,15 +1,15 @@
 import { createApp, ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import { getPatients, getPatientById, upsertPatient, addMessage } from './services/patientService.js';
-import { doctorLoginAPI, setCurrentDoctor, getCurrentDoctor, clearAuth } from './services/authService.js';
+import { validateDoctor, setCurrentDoctor, getCurrentDoctor, getCurrentDoctorDept, clearAuth } from './services/authService.js';
 
 const app = createApp({
     setup() {
-        // 读取本地缓存的医生状态
-        const currentDoc = getCurrentDoctor();
-        const doctorId = ref(currentDoc ? currentDoc.work_no : '');
+        const doctorId = ref(getCurrentDoctor());
         const doctorPwd = ref('');
-        const doctorDept = ref(currentDoc ? currentDoc.department : '');
-        const view = ref(currentDoc ? 'doctor-view' : 'login');
+        const view = ref(doctorId.value ? 'doctor-view' : 'login');
+
+        // 当前医生的科室
+        const doctorDept = ref(getCurrentDoctorDept());
 
         const refreshKey = ref(0);
 
@@ -21,59 +21,57 @@ const app = createApp({
         const patients = ref([]);
         const selectedPatientId = ref('');
 
-        // 加载并过滤患者数据
+        // 加载并过滤患者数据（只显示当前科室的患者）
         const loadPatients = () => {
             const allPatients = getPatients();
             if (doctorDept.value) {
                 patients.value = allPatients.filter(p => p.dept === doctorDept.value);
             } else {
-                patients.value = allPatients;
+                patients.value = allPatients; // 如果没有科室（理论上不会），显示全部
             }
         };
 
+        // 初始加载
         loadPatients();
 
-        // 监听 storage 事件
+        // 监听 storage 事件，重新加载患者列表
         const handleStorageChange = (e) => {
             if (e.key === 'smart_hospital_patients' || e.key === null) {
                 loadPatients();
             }
         };
 
-        onMounted(() => { window.addEventListener('storage', handleStorageChange); });
-        onUnmounted(() => { window.removeEventListener('storage', handleStorageChange); });
+        onMounted(() => {
+            window.addEventListener('storage', handleStorageChange);
+        });
+
+        onUnmounted(() => {
+            window.removeEventListener('storage', handleStorageChange);
+        });
 
         const selectedPatient = computed(() => {
             return patients.value.find(p => p.id === selectedPatientId.value) || null;
         });
 
-        // ==========================================
-        // 核心修改：对接 FastAPI 后端的医生登录
-        // ==========================================
-        const doctorLogin = async () => {
+        // 医生登录
+        const doctorLogin = () => {
             if (!doctorId.value || !doctorPwd.value) {
-                return alert('工号和密码不能为空');
+                alert('工号和密码不能为空');
+                return;
             }
-            try {
-                // 调用真实后端 API
-                const backendData = await doctorLoginAPI(doctorId.value, doctorPwd.value);
-
-                // 登录成功，更新系统状态
-                setCurrentDoctor(backendData);
-                doctorId.value = backendData.work_no;
-                doctorDept.value = backendData.department;
+            if (validateDoctor(doctorId.value, doctorPwd.value)) {
+                setCurrentDoctor(doctorId.value);
+                // 更新科室
+                doctorDept.value = getCurrentDoctorDept();
                 view.value = 'doctor-view';
-
-                // 刷新患者列表
-                loadPatients();
+                loadPatients(); // 重新加载（自动过滤）
                 if (patients.value.length > 0) {
                     selectedPatientId.value = patients.value[0].id;
                 } else {
-                    selectedPatientId.value = '';
+                    selectedPatientId.value = ''; // 无患者
                 }
-            } catch (error) {
-                // 这里的报错会直接显示后端传回的“工号或密码错误”
-                alert(error.message);
+            } else {
+                alert('工号或密码错误 (演示: d001/123)');
             }
         };
 
@@ -89,7 +87,7 @@ const app = createApp({
             selectedPatientId.value = id;
         };
 
-        // --- 以下为诊间辅助功能逻辑 (保持原样) ---
+        // 患者辅助页面状态
         const isPatientSigning = ref(false);
         const lastPatientSignText = ref('');
         const selectedTerm = ref('');
@@ -174,13 +172,6 @@ const app = createApp({
             return selectedPatient.value.messages?.filter(m => m.type === 'doc').slice(-5) || [];
         });
 
-        watch(view, (newVal) => {
-            if (newVal === 'doctor-view' && patients.value.length > 0) {
-                selectedPatientId.value = patients.value[0].id;
-            }
-            if (newVal !== 'doctor-view') showAddPrescription.value = false;
-        });
-
         return {
             view, doctorId, doctorPwd, doctorDept,
             patients, selectedPatientId, selectedPatient,
@@ -195,6 +186,7 @@ const app = createApp({
         };
     },
     template: `
+        <!-- 医生登录 -->
         <div v-if="view === 'login'" class="flex items-center justify-center min-h-screen">
             <div class="bg-white p-8 rounded-2xl shadow-2xl w-96">
                 <button @click="goToRoleSelect" class="text-sm text-blue-600 mb-4 flex items-center">← 返回场景选择</button>
@@ -205,12 +197,13 @@ const app = createApp({
                     <h2 class="text-2xl font-bold">医生专用登录</h2>
                 </div>
                 <input v-model="doctorId" type="text" placeholder="工号" class="w-full border-2 border-gray-100 p-3 rounded-xl mb-3 focus:border-purple-500 outline-none">
-                <input v-model="doctorPwd" type="password" placeholder="密码" @keyup.enter="doctorLogin" class="w-full border-2 border-gray-100 p-3 rounded-xl mb-5 focus:border-purple-500 outline-none">
+                <input v-model="doctorPwd" type="password" placeholder="密码" class="w-full border-2 border-gray-100 p-3 rounded-xl mb-5 focus:border-purple-500 outline-none">
                 <button @click="doctorLogin" class="w-full bg-purple-600 text-white py-3 rounded-xl font-bold hover:bg-purple-700">进入诊间</button>
-                <div class="text-xs text-gray-400 mt-4 text-center">演示账号: d001/123456 (骨科), d002/123456 (发热门诊)</div>
+                <div class="text-xs text-gray-400 mt-4 text-center">演示账号: d001/123 (骨科), d002/456 (发热门诊)</div>
             </div>
         </div>
 
+        <!-- 导航栏 (登录后) -->
         <nav v-else class="bg-white shadow-sm p-4 flex justify-between items-center px-8">
             <div class="flex items-center space-x-2">
                 <div class="w-8 h-8 bg-purple-600 rounded-lg flex items-center justify-center text-white font-bold">+</div>
@@ -222,7 +215,9 @@ const app = createApp({
             </div>
         </nav>
 
+        <!-- 医生工作区主界面 -->
         <div v-if="view === 'doctor-view'" class="max-w-7xl mx-auto p-6 grid grid-cols-12 gap-6">
+            <!-- 患者列表侧边栏 -->
             <div class="col-span-3 bg-white rounded-2xl shadow-sm p-4 h-fit">
                 <h3 class="font-bold border-b pb-4 mb-4">待诊患者 ({{ patients.length }}) <span class="text-sm font-normal text-gray-500 ml-2">{{ doctorDept }}</span></h3>
                 <div v-if="patients.length === 0" class="text-gray-400 text-center py-4">暂无本科室患者</div>
@@ -236,7 +231,9 @@ const app = createApp({
                 </div>
             </div>
 
+            <!-- 右侧主工作区 -->
             <div class="col-span-9 space-y-6" v-if="selectedPatient">
+                <!-- 患者概要卡片 -->
                 <div class="bg-white p-6 rounded-2xl shadow-sm border-t-4 border-blue-600">
                     <div class="flex flex-wrap justify-between items-start gap-4 mb-4">
                         <div>
@@ -254,10 +251,11 @@ const app = createApp({
                     <div class="grid grid-cols-3 gap-4 text-sm mb-2">
                         <div class="bg-slate-50 p-3 rounded-lg"><span class="text-gray-400 block">主诉/症状：</span><span class="font-medium text-blue-700">{{ selectedPatient.symptoms || '未记录' }}</span></div>
                         <div class="bg-slate-50 p-3 rounded-lg"><span class="text-gray-400 block">过敏史：</span><span class="font-medium text-red-600">{{ selectedPatient.allergy || '不详' }}</span></div>
-                        <div class="bg-slate-50 p-3 rounded-lg"><span class="text-gray-400 block">分诊科室：</span><span class="font-medium">{{ selectedPatient.dept || '待分诊' }}</span></div>
+                        <div class="bg-slate-50 p-3 rounded-lg"><span class="text-gray-400 block">年龄/性别：</span><span class="font-medium">{{ selectedPatient.age ? selectedPatient.age + '岁' : '?' }} / {{ selectedPatient.gender || '?' }}</span></div>
                     </div>
                 </div>
 
+                <!-- 病历记录 -->
                 <div class="bg-white p-6 rounded-2xl shadow-sm">
                     <div class="flex justify-between items-center mb-3">
                         <h3 class="font-bold text-lg flex items-center gap-2"><span class="w-1.5 h-5 bg-blue-500 rounded-full"></span>病历记录</h3>
@@ -266,6 +264,7 @@ const app = createApp({
                     <textarea v-model="selectedPatient.medicalHistory" rows="3" class="w-full border border-gray-200 rounded-xl p-3 text-sm focus:ring-2 focus:ring-blue-200 outline-none" placeholder="输入诊断..."></textarea>
                 </div>
 
+                <!-- 处方管理 -->
                 <div class="bg-white p-6 rounded-2xl shadow-sm">
                     <div class="flex justify-between items-center mb-3">
                         <h3 class="font-bold text-lg flex items-center gap-2"><span class="w-1.5 h-5 bg-green-500 rounded-full"></span>处方管理</h3>
@@ -294,21 +293,11 @@ const app = createApp({
                         </div>
                     </div>
                 </div>
-
-                <div class="bg-white p-6 rounded-2xl shadow-sm">
-                    <div class="flex justify-between items-center mb-3">
-                        <h3 class="font-bold text-lg flex items-center gap-2"><span class="w-1.5 h-5 bg-purple-500 rounded-full"></span>语音转文字发送</h3>
-                        <span class="text-xs text-gray-400">模拟语音识别</span>
-                    </div>
-                    <div class="flex space-x-2">
-                        <input v-model="voiceInput" @keyup.enter="sendVoiceMessage" type="text" placeholder="输入文字..." class="flex-1 border rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-purple-400">
-                        <button @click="sendVoiceMessage" class="bg-purple-600 text-white px-6 rounded-xl font-bold">发送</button>
-                    </div>
-                </div>
             </div>
             <div v-else class="col-span-9 bg-white rounded-2xl shadow-sm p-12 text-center text-gray-400">请从左侧选择一个患者开始就诊</div>
         </div>
 
+        <!-- 患者辅助页面 (保持不变) -->
         <div v-if="view === 'patient-assist'" class="max-w-6xl mx-auto p-6">
             <div class="bg-white rounded-3xl shadow-xl overflow-hidden">
                 <div class="bg-indigo-600 p-4 text-white flex justify-between items-center">
@@ -320,6 +309,7 @@ const app = createApp({
                 </div>
 
                 <div class="grid md:grid-cols-2 gap-6 p-6">
+                    <!-- 左侧手语区 -->
                     <div class="space-y-4">
                         <div class="camera-preview h-48">
                             <div class="scan-line" v-if="isPatientSigning"></div>
@@ -340,6 +330,7 @@ const app = createApp({
                         </div>
                     </div>
 
+                    <!-- 右侧医生语音 + AI词典 -->
                     <div class="space-y-4">
                         <div class="bg-blue-50 p-4 rounded-2xl border border-blue-200">
                             <div class="flex justify-between items-center mb-2">
