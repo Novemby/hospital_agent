@@ -1,29 +1,26 @@
 import { createApp, ref, onMounted, onUnmounted } from 'vue';
-import { getPatientById, addMessage, upsertPatient } from './services/patientService.js';
 import { SignLanguageAgent } from './services/signLanguageAgent.js';
-
-// 获取 URL 参数
-const urlParams = new URLSearchParams(window.location.search);
-const patientId = urlParams.get('patientId');
-const doctorId = urlParams.get('doctorId');
-
-if (!patientId) {
-    alert('未找到患者信息，请关闭窗口重试');
-    throw new Error('Missing patientId');
-}
+import { getPatientById, addMessage } from './services/patientService.js';
 
 const app = createApp({
     setup() {
-        // 获取患者信息
-        const patient = ref(getPatientById(patientId));
-        if (!patient.value) {
-            // 尝试从后端同步？暂时简单提示
-            alert('患者信息未找到，请确保已登录');
-        }
+        // ==================== 手语识别相关状态 ====================
+        const vueWordSequence = ref([]);
+        const currentWord = ref('-');
+        const currentConfidence = ref('-');
+        const currentCandidates = ref([]);
+        const currentCandidateIndex = ref(0);
+        const statusText = ref('请先开启摄像头');
+        const overlayText = ref('等待开始...');
+        const overlayClass = ref('overlay');
+        const cameraStarted = ref(false);
+        const recordDisabled = ref(true);
+        const waitingForHeadGesture = ref(false);
+        let headGestureTimeout = null;
 
         // 手语 agent
         const agent = new SignLanguageAgent({
-            apiUrl: 'http://localhost:5000',
+            apiUrl: 'http://localhost:8000',
             onResult: (result) => {
                 currentWord.value = result.prediction;
                 currentConfidence.value = `${(result.confidence * 100).toFixed(1)}%`;
@@ -58,6 +55,10 @@ const app = createApp({
                     statusText.value = '连接出了点问题';
                 } else if (status === 'wordConfirmed') {
                     statusText.value = data.isAuto ? `✓ 已自动确认「${data.word}」` : `✓ 好的，已记录「${data.word}」`;
+                    // 将确认的词作为患者消息发送给医生
+                    if (patientId) {
+                        addMessage(patientId, { type: 'pat', content: `[手语] ${data.word}` });
+                    }
                 } else if (status === 'emptySequence') {
                     alert('请先通过手语输入一些内容');
                 }
@@ -89,10 +90,7 @@ const app = createApp({
             }
         });
 
-        // 头部动作等待状态
-        const waitingForHeadGesture = ref(false);
-        let headGestureTimeout = null;
-
+        // 头部动作辅助函数
         const startHeadGestureWaiting = () => {
             waitingForHeadGesture.value = true;
             agent.enableHeadGesture(true);
@@ -124,19 +122,7 @@ const app = createApp({
             agent.enableHeadGesture(false);
         };
 
-        // UI 状态
-        const vueWordSequence = ref([]);
-        const currentWord = ref('-');
-        const currentConfidence = ref('-');
-        const currentCandidates = ref([]);
-        const currentCandidateIndex = ref(0);
-        const statusText = ref('请先开启摄像头');
-        const overlayText = ref('等待开始...');
-        const overlayClass = ref('overlay');
-        const cameraStarted = ref(false);
-        const recordDisabled = ref(true);
-
-        // 摄像头控制
+        // 手语识别操作方法
         const startCamera = async () => {
             try {
                 await agent.startCamera('webcam', 'canvas');
@@ -154,13 +140,13 @@ const app = createApp({
             if (agent.isRecording) {
                 agent.stopRecording();
                 const btn = document.getElementById('recordBtn');
-                if (btn) btn.textContent = '⏺ 开始识别';
-                if (btn) btn.classList.remove('btn-recording');
+                btn.textContent = '⏺ 开始识别';
+                btn.classList.remove('btn-recording');
             } else {
                 agent.startRecording();
                 const btn = document.getElementById('recordBtn');
-                if (btn) btn.textContent = '⏹ 停止';
-                if (btn) btn.classList.add('btn-recording');
+                btn.textContent = '⏹ 停止';
+                btn.classList.add('btn-recording');
             }
         };
 
@@ -168,36 +154,60 @@ const app = createApp({
             agent.clearSequence();
         };
 
-        const sendToDoctor = () => {
-            if (vueWordSequence.value.length === 0) {
-                alert('请先通过手语输入一些内容');
-                return;
+        const polishSequence = async () => {
+            const result = await agent.polishSequence();
+            if (result) {
+                alert(`AI 整理结果：${result.polished}`);
+                if (result.triage) {
+                    alert(`分诊建议：${result.triage.department} - ${result.triage.advice}`);
+                }
             }
-            const fullText = vueWordSequence.value.join('');
-            if (!patient.value) {
-                alert('患者信息丢失');
-                return;
-            }
-            addMessage(patient.value.id, { type: 'pat', content: `[手语] ${fullText}` });
-            agent.clearSequence();
-            alert('手语内容已发送给医生');
-            // 可选：关闭窗口或清空序列后继续
         };
 
-        // 自动开启摄像头
+        // ==================== 医生消息相关 ====================
+        const doctorMessages = ref([]);
+        const patientId = new URLSearchParams(window.location.search).get('patientId');
+
+        const loadDoctorMessages = () => {
+            if (!patientId) return;
+            const patient = getPatientById(patientId);
+            if (patient && patient.messages) {
+                // 筛选医生发送的消息，并按 id（时间）升序排列
+                doctorMessages.value = patient.messages
+                    .filter(m => m.type === 'doc')
+                    .sort((a, b) => a.id - b.id);
+            } else {
+                doctorMessages.value = [];
+            }
+        };
+
+        const handleStorageChange = (e) => {
+            if (e.key === 'smart_hospital_patients') {
+                loadDoctorMessages();
+            }
+        };
+
+        const formatTime = (timestamp) => {
+            if (!timestamp) return '';
+            const date = new Date(timestamp);
+            return `${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`;
+        };
+
+        // ==================== 生命周期 ====================
         onMounted(() => {
-            setTimeout(() => {
-                startCamera().catch(e => console.warn('摄像头启动失败', e));
-            }, 500);
+            // 加载医生消息
+            loadDoctorMessages();
+            window.addEventListener('storage', handleStorageChange);
         });
 
         onUnmounted(() => {
             agent.stopCamera();
             clearHeadGestureTimer();
+            window.removeEventListener('storage', handleStorageChange);
         });
 
         return {
-            patient,
+            // 手语识别
             vueWordSequence,
             currentWord,
             currentConfidence,
@@ -209,26 +219,26 @@ const app = createApp({
             startCamera,
             toggleRecording,
             clearSequence,
-            sendToDoctor,
-            // 供删除词使用
-            agent
+            polishSequence,
+            // 医生消息
+            doctorMessages,
+            formatTime,
+            // 辅助
+            agent // 用于模板中可能的事件绑定
         };
     },
     template: `
-        <div class="max-w-7xl mx-auto">
+        <div class="max-w-7xl mx-auto p-4">
             <div class="bg-white rounded-3xl shadow-xl overflow-hidden">
-                <div class="bg-indigo-600 p-4 text-white flex justify-between items-center">
-                    <span class="font-bold flex items-center gap-2">
-                        <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path d="M10 12a2 2 0 100-4 2 2 0 000 4z"></path><path fill-rule="evenodd" d="M.458 10C1.732 5.943 5.522 3 10 3s8.268 2.943 9.542 7c-1.274 4.057-5.064 7-9.542 7S1.732 14.057.458 10zM14 10a4 4 0 11-8 0 4 4 0 018 0z" clip-rule="evenodd"></path></svg>
-                        患者手语辅助 · {{ patient?.name }}
-                    </span>
+                <div class="bg-blue-600 p-4 text-white flex justify-between items-center">
+                    <span class="font-bold">🤟 手语翻译官 · 患者辅助窗口</span>
                     <button @click="window.close()" class="text-sm bg-white/20 px-4 py-1 rounded-full hover:bg-white/30">关闭窗口</button>
                 </div>
                 <div class="p-6">
-                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                         <!-- 左侧：摄像头区 -->
                         <div class="bg-white rounded-2xl shadow-sm p-4">
-                            <h2 class="text-lg font-bold mb-4 flex items-center gap-2">🤟 手语翻译</h2>
+                            <h2 class="text-lg font-bold mb-4 flex items-center gap-2">📹 请对着摄像头比划</h2>
                             <div class="video-container relative">
                                 <video id="webcam" autoplay playsinline class="w-full rounded-lg"></video>
                                 <canvas id="canvas" class="absolute top-0 left-0 w-full h-full"></canvas>
@@ -252,8 +262,9 @@ const app = createApp({
                             </div>
                         </div>
 
-                        <!-- 右侧：AI 交互区 + 发送按钮 -->
+                        <!-- 右侧：AI 交互区 + 医生消息区 -->
                         <div class="space-y-6">
+                            <!-- AI 交互框 -->
                             <div class="bg-white rounded-2xl shadow-sm p-4 border border-blue-100">
                                 <h2 class="text-lg font-bold mb-4 flex items-center gap-2">🤖 AI 助手</h2>
                                 <div class="current-word text-center p-6 bg-orange-50 rounded-xl mb-4">
@@ -265,19 +276,32 @@ const app = createApp({
                                     <h3 class="font-medium mb-2">📝 已确认的表达</h3>
                                     <div class="word-sequence flex flex-wrap gap-2 min-h-[50px] p-3 bg-gray-50 rounded-lg">
                                         <span v-if="vueWordSequence.length === 0" class="placeholder text-gray-400">通过手语识别后，点头确认添加</span>
-                                        <span v-for="(word, idx) in vueWordSequence" :key="idx" class="word-tag">
+                                        <span v-for="(word, idx) in vueWordSequence" :key="idx" class="word-tag bg-green-100 px-3 py-1 rounded-full text-sm">
                                             {{ word }}
-                                            <button @click="agent.deleteWord(idx)">×</button>
+                                            <button @click="agent.deleteWord(idx)" class="ml-2 text-red-500 hover:text-red-700">&times;</button>
                                         </span>
                                     </div>
                                     <div class="flex justify-end gap-2 mt-3">
                                         <button @click="clearSequence" class="text-sm text-gray-500 hover:text-gray-700">清空</button>
+                                        <button @click="polishSequence" class="text-sm bg-indigo-50 text-indigo-600 px-3 py-1 rounded-full hover:bg-indigo-100">✨ 润色并分诊</button>
                                     </div>
                                 </div>
+                            </div>
 
-                                <button @click="sendToDoctor" class="w-full mt-4 bg-indigo-600 text-white py-2 rounded-lg hover:bg-indigo-700">
-                                    发送手语内容给医生
-                                </button>
+                            <!-- 医生消息窗口 -->
+                            <div class="bg-white rounded-2xl shadow-sm p-4 border border-gray-200">
+                                <h3 class="font-bold text-lg mb-3 flex items-center gap-2">
+                                    <span>👨‍⚕️</span> 医生消息
+                                </h3>
+                                <div class="space-y-2 max-h-80 overflow-y-auto">
+                                    <div v-if="doctorMessages.length === 0" class="text-gray-400 text-center py-4">
+                                        暂无医生消息
+                                    </div>
+                                    <div v-for="msg in doctorMessages" :key="msg.id" class="bg-blue-50 p-3 rounded-lg">
+                                        <div class="text-sm text-blue-800">{{ msg.content }}</div>
+                                        <div class="text-xs text-gray-400 mt-1">{{ formatTime(msg.created_at) }}</div>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>

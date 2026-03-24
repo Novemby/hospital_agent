@@ -85,7 +85,7 @@ const app = createApp({
             const formData = new FormData();
             formData.append('audio', audioBlob);
             try {
-                const response = await fetch('http://localhost:5000/speech-to-text', {
+                const response = await fetch('http://localhost:8000/speech-to-text', {
                     method: 'POST',
                     body: formData
                 });
@@ -115,6 +115,20 @@ const app = createApp({
             if (!doctorVoiceText.value.trim() || !selectedPatient.value) return;
             addMessage(selectedPatient.value.id, { type: 'doc', content: doctorVoiceText.value });
             doctorVoiceText.value = '';
+        };
+
+        // ========== 新增：患者手语消息显示 ==========
+        const patientMessages = computed(() => {
+            if (!selectedPatient.value) return [];
+            return (selectedPatient.value.messages || [])
+                .filter(m => m.type === 'pat')
+                .sort((a, b) => a.id - b.id);
+        });
+
+        const formatTime = (timestamp) => {
+            if (!timestamp) return '';
+            const date = new Date(timestamp);
+            return `${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`;
         };
 
         // ========== 原有函数（医生登录、患者列表等）==========
@@ -278,7 +292,9 @@ const app = createApp({
             // 医生语音转文字
             doctorVoiceText, doctorRecognizedText, isRecordingVoiceForDoc,
             startDoctorVoiceRecording, stopDoctorVoiceRecording,
-            confirmDoctorVoiceText, cancelDoctorVoiceText, sendDoctorVoiceMessage
+            confirmDoctorVoiceText, cancelDoctorVoiceText, sendDoctorVoiceMessage,
+            // 患者手语消息
+            patientMessages, formatTime
         };
     },
     template: `
@@ -384,7 +400,23 @@ const app = createApp({
                     </div>
                 </div>
 
-                <!-- 新增：医生语音转文字区域，仅在手语辅助窗口打开时显示 -->
+                <!-- 患者手语输入区域，仅在手语辅助窗口打开时显示 -->
+                <div v-if="isHandsignOpen" class="bg-white p-6 rounded-2xl shadow-sm mt-4">
+                    <h3 class="font-bold text-lg flex items-center gap-2">
+                        <span class="w-1.5 h-5 bg-green-500 rounded-full"></span>患者手语输入
+                    </h3>
+                    <div class="space-y-2 max-h-60 overflow-y-auto">
+                        <div v-if="patientMessages.length === 0" class="text-gray-400 text-center py-4">
+                            暂无手语消息
+                        </div>
+                        <div v-for="msg in patientMessages" :key="msg.id" class="bg-green-50 p-3 rounded-lg">
+                            <div class="text-sm text-green-800">{{ msg.content }}</div>
+                            <div class="text-xs text-gray-400 mt-1">{{ formatTime(msg.created_at) }}</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 医生语音转文字区域，仅在手语辅助窗口打开时显示 -->
                 <div v-if="isHandsignOpen" class="bg-white p-6 rounded-2xl shadow-sm mt-4">
                     <div class="flex justify-between items-center mb-3">
                         <h3 class="font-bold text-lg flex items-center gap-2"><span class="w-1.5 h-5 bg-purple-500 rounded-full"></span>医生语音转文字</h3>

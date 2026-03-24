@@ -2,13 +2,18 @@ from datetime import datetime
 from enum import Enum
 from typing import Dict, Optional
 
-from fastapi import FastAPI, Depends, HTTPException, Query
+from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Query
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
-from sqlalchemy import desc
 from backend.database import SessionLocal, engine
 from backend import models
 from pydantic import BaseModel
+import requests
+import base64
+import time
+
+from pydub import AudioSegment
+import io
 
 
 # --- 定义接收前端 JSON 数据的格式 ---
@@ -91,12 +96,7 @@ models.Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="无障碍智慧医疗辅助系统 API")
 
-@app.on_event("startup")
-def log_app_info():
-    print("[STARTUP_DEBUG] main.py:", __file__)
-    print("[STARTUP_DEBUG] routes:", [route.path + " " + ",".join(sorted(route.methods)) for route in app.routes])
-
-# 配置 CORS，允许前端 Vue 项目跨域请求
+# 配置 CORS，允许前端跨域请求
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  # 开发阶段允许所有地址，生产环境应严格限制
@@ -105,8 +105,96 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ==================== 百度语音识别配置 ====================
+BAIDU_API_KEY = "lwUYmBdFPhZxU7ESNir7mF75"  # 请替换为实际值
+BAIDU_SECRET_KEY = "Ny4uiiKwbr1k21yt2iM0SFz6hWo0hwId"  # 请替换为实际值
+BAIDU_TOKEN_URL = "https://aip.baidubce.com/oauth/2.0/token"
+BAIDU_SPEECH_URL = "https://vop.baidu.com/server_api"
 
-# 依赖注入：获取数据库会话
+_baidu_token = None
+_token_expires = 0
+
+
+def get_baidu_token():
+    """获取百度access_token，带缓存"""
+    global _baidu_token, _token_expires
+    if _baidu_token and time.time() < _token_expires:
+        return _baidu_token
+    try:
+        params = {
+            "grant_type": "client_credentials",
+            "client_id": BAIDU_API_KEY,
+            "client_secret": BAIDU_SECRET_KEY
+        }
+        resp = requests.post(BAIDU_TOKEN_URL, params=params)
+        if resp.status_code == 200:
+            data = resp.json()
+            _baidu_token = data.get("access_token")
+            # 有效期默认为30天，这里设置28天余量
+            _token_expires = time.time() + 28 * 24 * 3600
+            return _baidu_token
+        else:
+            raise Exception(f"获取百度token失败，状态码：{resp.status_code}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"语音识别服务初始化失败: {str(e)}")
+
+
+# ==================== 语音转文字接口 ====================
+@app.post("/speech-to-text")
+async def speech_to_text(audio: UploadFile = File(...)):
+    """
+    语音转文字接口：自动将任意音频格式转换为 PCM 16k 16bit mono
+    """
+    try:
+        # 读取上传的音频内容
+        audio_bytes = await audio.read()
+        if len(audio_bytes) == 0:
+            raise HTTPException(status_code=400, detail="音频文件为空")
+
+        # 使用 pydub 加载音频（会自动根据扩展名/内容识别格式）
+        audio_segment = AudioSegment.from_file(io.BytesIO(audio_bytes))
+
+        # 转换为单声道、16kHz、16bit PCM
+        audio_segment = audio_segment.set_channels(1).set_frame_rate(16000).set_sample_width(2)
+
+        # 导出 PCM 原始数据
+        pcm_data = audio_segment.raw_data
+
+        # Base64 编码
+        audio_base64 = base64.b64encode(pcm_data).decode('utf-8')
+
+        token = get_baidu_token()
+
+        data = {
+            "format": "pcm",
+            "rate": 16000,
+            "channel": 1,
+            "cuid": "fastapi_server",
+            "token": token,
+            "speech": audio_base64,
+            "len": len(pcm_data)
+        }
+        headers = {"Content-Type": "application/json"}
+        resp = requests.post(BAIDU_SPEECH_URL, json=data, headers=headers, timeout=10)
+        result = resp.json()
+
+        if result.get("err_no") == 0:
+            text = result["result"][0]
+            return {"success": True, "text": text}
+        else:
+            # 返回详细错误信息，便于前端调试
+            return {"success": False, "error": result.get("err_msg", "未知错误")}
+    except Exception as e:
+        # 捕获所有异常并返回友好错误
+        raise HTTPException(status_code=500, detail=f"语音识别服务错误: {str(e)}")
+
+# ==================== 测试端点（可选）====================
+@app.get("/test")
+def test():
+    return {"message": "后端服务正常运行"}
+
+
+# ==================== 依赖注入：获取数据库会话 ====================
 def get_db():
     db = SessionLocal()
     try:
@@ -115,53 +203,52 @@ def get_db():
         db.close()
 
 
-# ==========================================
-# API 路由区域
-# ==========================================
-
+# ==================== 新增：患者列表接口 ====================
 @app.get("/api/patients")
-def get_patients(dept: str = Query(None, description="科室过滤，可选"), db: Session = Depends(get_db)):
+def get_patients(dept: Optional[str] = Query(None), db: Session = Depends(get_db)):
     """
-    获取所有患者信息（支持按科室过滤）
-    返回的每个患者包含最新挂号科室（dept），若无挂号记录则 dept 为 None
+    获取患者列表（可按科室筛选）
+    若提供科室，则返回该科室下有挂号记录的患者（去重）
+    若不提供科室，则返回所有患者
     """
-    # 先查询所有患者
-    patients = db.query(models.Patient).all()
+    if dept:
+        # 查询该科室下有过挂号记录的患者
+        patients = db.query(models.Patient).join(
+            models.Registration,
+            models.Patient.id == models.Registration.patient_id
+        ).filter(models.Registration.department == dept).distinct().all()
+    else:
+        patients = db.query(models.Patient).all()
+
     result = []
-
-    for patient in patients:
-        # 获取该患者的最新挂号记录（按创建时间倒序）
+    for p in patients:
+        # 获取该患者最近一次挂号的科室（用于前端显示）
         latest_reg = db.query(models.Registration).filter(
-            models.Registration.patient_id == patient.id
-        ).order_by(desc(models.Registration.created_at)).first()
+            models.Registration.patient_id == p.id
+        ).order_by(models.Registration.created_at.desc()).first()
+        dept_name = latest_reg.department if latest_reg else None
 
-        # 若提供了科室参数，则只返回科室匹配的患者
-        if dept and (not latest_reg or latest_reg.department != dept):
-            continue
-
-        # 构造返回数据
         result.append({
-            "id": patient.id,
-            "name": patient.name,
-            "gender": patient.gender,
-            "birth_date": patient.birth_date,
-            "contact_phone": patient.contact_phone,
-            "id_card": patient.id_card,
-            "allergy_history": patient.allergy_history,
-            "is_deaf": patient.is_deaf,
-            "dept": latest_reg.department if latest_reg else None   # 最新挂号科室
+            "id": p.id,
+            "name": p.name,
+            "gender": p.gender,
+            "birth_date": p.birth_date,
+            "contact_phone": p.contact_phone,
+            "id_card": p.id_card,
+            "allergy_history": p.allergy_history,
+            "is_deaf": p.is_deaf,
+            "dept": dept_name,  # 最近挂号科室
         })
-
     return result
 
 
+# ==================== 原有 API 路由 ====================
 @app.get("/api/patients/{patient_id}")
 def get_patient(patient_id: int, db: Session = Depends(get_db)):
     """根据 ID 获取患者基本信息"""
     patient = db.query(models.Patient).filter(models.Patient.id == patient_id).first()
     if not patient:
         raise HTTPException(status_code=404, detail="未找到该患者档案")
-
     return {
         "id": patient.id,
         "name": patient.name,
@@ -180,7 +267,6 @@ def get_doctor(doctor_id: int, db: Session = Depends(get_db)):
     doctor = db.query(models.Doctor).filter(models.Doctor.id == doctor_id).first()
     if not doctor:
         raise HTTPException(status_code=404, detail="未找到该医生信息")
-
     return {
         "id": doctor.id,
         "work_no": doctor.work_no,
@@ -194,9 +280,7 @@ def get_doctor(doctor_id: int, db: Session = Depends(get_db)):
 @app.get("/api/patients/{patient_id}/registrations")
 def get_patient_registrations(patient_id: int, db: Session = Depends(get_db)):
     """获取指定患者的所有挂号流水及当前状态"""
-    registrations = db.query(models.Registration).filter(
-        models.Registration.patient_id == patient_id
-    ).all()
+    registrations = db.query(models.Registration).filter(models.Registration.patient_id == patient_id).all()
     return [
         {
             "id": reg.id,
@@ -210,17 +294,12 @@ def get_patient_registrations(patient_id: int, db: Session = Depends(get_db)):
     ]
 
 
-# ==========================================
-# 登录专属 API 路由
-# ==========================================
-
 @app.get("/api/patients/by-idcard/{id_card}")
 def get_patient_by_idcard(id_card: str, db: Session = Depends(get_db)):
     """患者登录：通过身份证号查询患者档案"""
     patient = db.query(models.Patient).filter(models.Patient.id_card == id_card).first()
     if not patient:
         raise HTTPException(status_code=404, detail="未找到该身份证对应的患者，请先建档")
-
     return {
         "id": patient.id,
         "name": patient.name,
@@ -234,14 +313,8 @@ def get_patient_by_idcard(id_card: str, db: Session = Depends(get_db)):
 def doctor_login(login_data: DoctorLoginRequest, db: Session = Depends(get_db)):
     """医生登录"""
     doctor = db.query(models.Doctor).filter(models.Doctor.work_no == login_data.work_no).first()
-
-    print("[LOGIN_DEBUG] work_no:", login_data.work_no)
-    print("[LOGIN_DEBUG] input_password:", login_data.password)
-    print("[LOGIN_DEBUG] doctor_record:", doctor.work_no if doctor else None, doctor.password if doctor else None)
-
     if not doctor or doctor.password != login_data.password:
         raise HTTPException(status_code=401, detail="工号或密码错误")
-
     return {
         "id": doctor.id,
         "work_no": doctor.work_no,

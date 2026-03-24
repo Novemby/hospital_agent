@@ -63,7 +63,7 @@ function normalizePatient(patient) {
     };
 }
 
-// 从后端获取患者列表并更新本地存储
+// 从后端获取患者列表并更新本地存储（合并更新，保留本地数据）
 async function syncPatientsFromBackend(dept = null) {
     let url = `${API_BASE_URL}/patients`;
     if (dept) {
@@ -74,9 +74,22 @@ async function syncPatientsFromBackend(dept = null) {
         throw new Error(`获取患者列表失败: ${response.status}`);
     }
     const rawPatients = await response.json();
-    const standardized = rawPatients.map(normalizePatient);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(standardized));
-    return standardized;
+    // 获取本地现有患者数据
+    const localPatients = getPatients();
+    const mergedPatients = rawPatients.map(backendPatient => {
+        const local = localPatients.find(p => p.id == backendPatient.id);
+        if (local) {
+            // 合并：保留本地存储的病史、处方、消息等，用后端返回的基本信息覆盖
+            return {
+                ...local,                     // 保留所有本地字段
+                ...normalizePatient(backendPatient), // 覆盖基本信息（如姓名、性别、科室等）
+            };
+        } else {
+            return normalizePatient(backendPatient);
+        }
+    });
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(mergedPatients));
+    return mergedPatients;
 }
 
 // 初始化本地数据（若本地无数据则使用默认）
@@ -128,7 +141,7 @@ function addMessage(patientId, message) {
     }
 }
 
-// 统一导出（这里只导出一次，避免重复）
+// 统一导出
 export {
     getPatients,
     getPatientById,

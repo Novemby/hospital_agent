@@ -20,7 +20,7 @@ const app = createApp({
 
         // 手语 agent
         const agent = new SignLanguageAgent({
-            apiUrl: 'http://localhost:5000',
+            apiUrl: 'http://localhost:8000',
             onResult: (result) => {
                 // 更新识别结果显示
                 currentWord.value = result.prediction;
@@ -312,7 +312,7 @@ const app = createApp({
             const formData = new FormData();
             formData.append('audio', audioBlob);
             try {
-                const response = await fetch('http://localhost:5000/speech-to-text', {
+                const response = await fetch('http://localhost:8000/speech-to-text', {
                     method: 'POST',
                     body: formData
                 });
