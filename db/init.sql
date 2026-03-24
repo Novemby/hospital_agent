@@ -1,4 +1,18 @@
 -- 初始化数据库与测试数据
+CREATE DATABASE IF NOT EXISTS medical_agent_db DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+USE medical_agent_db;
+
+SET FOREIGN_KEY_CHECKS = 0;
+DROP TABLE IF EXISTS biz_chat_message;
+DROP TABLE IF EXISTS ai_agent_memory;
+DROP TABLE IF EXISTS biz_medical_record;
+DROP TABLE IF EXISTS biz_registration;
+DROP TABLE IF EXISTS biz_schedule;
+DROP TABLE IF EXISTS biz_queue_counter;
+DROP TABLE IF EXISTS sys_department;
+DROP TABLE IF EXISTS sys_doctor;
+DROP TABLE IF EXISTS sys_patient;
+SET FOREIGN_KEY_CHECKS = 1;
 
 CREATE DATABASE IF NOT EXISTS medical_agent_db DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 USE medical_agent_db;
