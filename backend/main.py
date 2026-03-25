@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from backend.database import engine, Base
 from backend.routers import patients, doctors, registrations, agent, speech
+from backend.routers import sign_language
 
 # 创建数据库表（生产环境应使用 Alembic）
 Base.metadata.create_all(bind=engine)
@@ -23,6 +24,7 @@ app.include_router(doctors.router)
 app.include_router(registrations.router)
 app.include_router(agent.router)
 app.include_router(speech.router)
+app.include_router(sign_language.router)
 
 @app.get("/test")
 def test():

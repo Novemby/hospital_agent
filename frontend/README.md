@@ -2,6 +2,8 @@
 frontend/
 ├── index.html                  # 场景选择入口
 ├── reg.html                    # 挂号场景
+├── handsign.html
+├── handsign_assist.html
 ├── scene2.html                 # 就诊场景
 ├── scene3.html                 # 我的场景
 ├── css/
@@ -14,8 +16,10 @@ frontend/
 │   ├── scene1.js               # 挂号场景逻辑（对应 reg.html）
 │   ├── scene2.js               # 就诊场景逻辑
 │   ├── scene3.js               # 我的场景逻辑
+│   ├── handsign_assist.js
 │   ├── services/
 │   │   ├── authService.js      # 认证服务
+│   │   ├── signLanguageAgent.js
 │   │   └── patientService.js   # 患者数据服务
 │   └── utils/                  # 工具函数（空）
 └── assets/                     # 静态资源（空）

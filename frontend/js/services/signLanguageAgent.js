@@ -1,16 +1,21 @@
 // 手语识别 Agent - 集成头部姿态检测（点头/摇头）替代候选词选择
+// 适配新识别服务（5000端口）与原有后端（8000端口）协同
 export class SignLanguageAgent {
     constructor(options = {}) {
         this.options = {
-            apiUrl: 'http://localhost:5000',
+            // 原有后端地址（序列管理、润色等）
+            apiUrl: 'http://localhost:8000',
+            // 新识别服务地址
+            recognitionApiUrl: 'http://localhost:8000/api/sign',
             mode: 'isolated',
             onResult: () => {},
             onSequenceUpdate: () => {},
             onStatusChange: () => {},
-            onHeadGesture: () => {},      // 新增：头部动作回调 { type: 'nod' | 'shake' }
+            onHeadGesture: () => {},
             ...options
         };
         this.apiUrl = this.options.apiUrl;
+        this.recognitionApiUrl = this.options.recognitionApiUrl;
         this.mode = this.options.mode;
 
         // MediaPipe 相关
@@ -23,7 +28,7 @@ export class SignLanguageAgent {
 
         // 孤立词识别相关
         this.isRecording = false;
-        this.framesBuffer = [];
+        this.keypointsBuffer = [];   // 存储每帧的关键点数组
         this.frameCount = 0;
         this.lastCaptureTime = 0;
 
@@ -39,17 +44,17 @@ export class SignLanguageAgent {
         this.headGestureEnabled = false;
         this.lastHeadPose = { pitch: 0, yaw: 0 };
         this.gestureDebounceTimer = null;
-        this.gestureCooldown = 500;        // 动作冷却时间(ms)
-        this.gestureThreshold = 15;         // 角度变化阈值(度)
-        this.gestureStableFrames = 3;       // 稳定帧数
+        this.gestureCooldown = 500;
+        this.gestureThreshold = 15;
+        this.gestureStableFrames = 3;
 
-        // Holistic 连接常量
+        // Holistic 连接常量（绘制用）
         this.POSE_CONNECTIONS = [[0,1],[1,2],[2,3],[3,7],[0,4],[4,5],[5,6],[6,8],[9,10],[11,12],[11,13],[13,15],[12,14],[14,16],[11,23],[12,24],[23,24]];
         this.HAND_CONNECTIONS = [[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[0,9],[9,10],[10,11],[11,12],[0,13],[13,14],[14,15],[15,16],[0,17],[17,18],[18,19],[19,20],[5,9],[9,13],[13,17]];
 
         this.initHolistic = this.initHolistic.bind(this);
         this.onHolisticResults = this.onHolisticResults.bind(this);
-        this.captureRawFrame = this.captureRawFrame.bind(this);
+        this.extractLandmarks = this.extractLandmarks.bind(this);
         this.detectHeadGesture = this.detectHeadGesture.bind(this);
     }
 
@@ -65,6 +70,44 @@ export class SignLanguageAgent {
             refineFaceLandmarks: true
         });
         this.holistic.onResults(this.onHolisticResults);
+    }
+
+    // 从 results 中提取 543 个关键点（姿态33 + 左手21 + 右手21 + 面部468）
+    extractLandmarks(results) {
+        const landmarks = [];
+        // 姿态点 (33个)
+        if (results.poseLandmarks) {
+            for (const lm of results.poseLandmarks) {
+                landmarks.push([lm.x, lm.y, lm.z]);
+            }
+        } else {
+            for (let i = 0; i < 33; i++) landmarks.push([0,0,0]);
+        }
+        // 左手 (21个)
+        if (results.leftHandLandmarks) {
+            for (const lm of results.leftHandLandmarks) {
+                landmarks.push([lm.x, lm.y, lm.z]);
+            }
+        } else {
+            for (let i = 0; i < 21; i++) landmarks.push([0,0,0]);
+        }
+        // 右手 (21个)
+        if (results.rightHandLandmarks) {
+            for (const lm of results.rightHandLandmarks) {
+                landmarks.push([lm.x, lm.y, lm.z]);
+            }
+        } else {
+            for (let i = 0; i < 21; i++) landmarks.push([0,0,0]);
+        }
+        // 面部 (468个)
+        if (results.faceLandmarks) {
+            for (const lm of results.faceLandmarks) {
+                landmarks.push([lm.x, lm.y, lm.z]);
+            }
+        } else {
+            for (let i = 0; i < 468; i++) landmarks.push([0,0,0]);
+        }
+        return landmarks; // 长度应为 33+21+21+468 = 543
     }
 
     onHolisticResults(results) {
@@ -95,54 +138,49 @@ export class SignLanguageAgent {
 
         this.ctx.restore();
 
-        if (this.isRecording) this.captureRawFrame();
+        // 录制时捕获关键点数据
+        if (this.isRecording) {
+            const landmarks = this.extractLandmarks(results);
+            this.keypointsBuffer.push(landmarks);
+            this.frameCount++;
+            this.options.onStatusChange('recording', { frameCount: this.frameCount });
+        }
     }
 
-    // 使用面部关键点估算头部欧拉角（简单方法：利用左右眼中心和鼻尖）
     detectHeadGesture(faceLandmarks) {
-        // 关键点索引参考 MediaPipe Face Mesh
-        // 左眼中心: 33, 133; 右眼中心: 362, 263; 鼻尖: 1
+        // 使用左右眼中心和鼻尖估算头部姿态
         const leftEye = faceLandmarks[33];
         const rightEye = faceLandmarks[263];
         const nose = faceLandmarks[1];
 
-        // 计算水平方向偏航角(yaw)：左右眼与鼻尖的横向偏移
         const eyeCenterX = (leftEye.x + rightEye.x) / 2;
-        const yaw = (nose.x - eyeCenterX) * 180; // 粗略映射
-
-        // 计算垂直方向俯仰角(pitch)：鼻尖相对于眼睛中心的垂直偏移
+        const yaw = (nose.x - eyeCenterX) * 180;
         const eyeCenterY = (leftEye.y + rightEye.y) / 2;
         const pitch = (nose.y - eyeCenterY) * 180;
 
-        // 简单平滑
         const deltaPitch = pitch - this.lastHeadPose.pitch;
         const deltaYaw = yaw - this.lastHeadPose.yaw;
         this.lastHeadPose = { pitch, yaw };
 
-        // 检测动作（需要连续帧稳定，这里简化处理）
         if (Math.abs(deltaPitch) > this.gestureThreshold) {
-            // 点头：俯仰角变化大
             this.triggerGesture('nod');
         } else if (Math.abs(deltaYaw) > this.gestureThreshold) {
-            // 摇头：偏航角变化大
             this.triggerGesture('shake');
         }
     }
 
     triggerGesture(type) {
-        if (this.gestureDebounceTimer) return; // 冷却中
+        if (this.gestureDebounceTimer) return;
         this.options.onHeadGesture({ type });
         this.gestureDebounceTimer = setTimeout(() => {
             this.gestureDebounceTimer = null;
         }, this.gestureCooldown);
     }
 
-    // 开启/关闭头部姿态检测
     enableHeadGesture(enable) {
         this.headGestureEnabled = enable;
     }
 
-    // 开始摄像头
     async startCamera(videoElementId, canvasElementId) {
         if (this.cameraStarted) return;
         this.webcam = document.getElementById(videoElementId);
@@ -160,23 +198,10 @@ export class SignLanguageAgent {
         this.options.onStatusChange('cameraStarted', true);
     }
 
-    captureRawFrame() {
-        const now = Date.now();
-        if (now - this.lastCaptureTime < 33) return;
-        this.lastCaptureTime = now;
-        const tempCanvas = document.createElement('canvas');
-        tempCanvas.width = this.webcam.videoWidth;
-        tempCanvas.height = this.webcam.videoHeight;
-        tempCanvas.getContext('2d').drawImage(this.webcam, 0, 0);
-        this.framesBuffer.push(tempCanvas.toDataURL('image/jpeg', 0.8).split(',')[1]);
-        this.frameCount++;
-        this.options.onStatusChange('recording', { frameCount: this.frameCount });
-    }
-
     startRecording() {
         if (!this.cameraStarted) return;
         this.isRecording = true;
-        this.framesBuffer = [];
+        this.keypointsBuffer = [];
         this.frameCount = 0;
         this.lastCaptureTime = 0;
         this.clearPredictionBuffer();
@@ -186,30 +211,35 @@ export class SignLanguageAgent {
     async stopRecording() {
         if (!this.isRecording) return;
         this.isRecording = false;
-        if (this.framesBuffer.length < 5) {
+        if (this.keypointsBuffer.length < 5) {
             this.options.onStatusChange('tooShort');
             return;
         }
-        this.options.onStatusChange('sending', { frameCount: this.framesBuffer.length });
+        this.options.onStatusChange('sending', { frameCount: this.keypointsBuffer.length });
         try {
-            const response = await fetch(`${this.apiUrl}/recognize`, {
+            // 将每个帧的关键点展平为一维数组
+            const flattenedFrames = this.keypointsBuffer.map(frame => frame.flat());
+            const response = await fetch(`${this.recognitionApiUrl}/recognize`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ frames: this.framesBuffer, confidence_threshold: 0.3, auto_add: false, trim_frames: 2 })
+                body: JSON.stringify({ frames: flattenedFrames })
             });
             const result = await response.json();
-            if (result.success) {
-                this.displayResult(result.prediction, result.confidence);
+            if (result.word) {
+                const prediction = result.word;
+                const confidence = result.confidence || 0.8;
+                this.displayResult(prediction, confidence);
                 this.options.onResult({
-                    prediction: result.prediction,
-                    confidence: result.confidence,
-                    topPredictions: result.top_predictions || []
+                    prediction: prediction,
+                    confidence: confidence,
+                    topPredictions: []
                 });
-                this.options.onStatusChange('resultReady', { prediction: result.prediction, confidence: result.confidence, topPredictions: result.top_predictions });
+                this.options.onStatusChange('resultReady', { prediction, confidence, topPredictions: [] });
             } else {
                 this.options.onStatusChange('recognitionFailed');
             }
         } catch (error) {
+            console.error('Recognition error:', error);
             this.options.onStatusChange('networkError');
         }
     }
@@ -251,6 +281,7 @@ export class SignLanguageAgent {
 
     async confirmWord(label, isAuto = false) {
         try {
+            // 调用原有后端确认词接口（序列管理）
             const response = await fetch(`${this.apiUrl}/confirm_word`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -266,6 +297,7 @@ export class SignLanguageAgent {
                 this.options.onStatusChange('confirmFailed');
             }
         } catch (error) {
+            console.error('Confirm word error:', error);
             this.options.onStatusChange('networkError');
         }
     }
@@ -296,6 +328,7 @@ export class SignLanguageAgent {
                 throw new Error(result.error);
             }
         } catch (error) {
+            console.error('Polish error:', error);
             this.options.onStatusChange('polishFailed');
             return null;
         }
