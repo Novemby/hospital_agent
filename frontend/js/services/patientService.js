@@ -60,6 +60,7 @@ function normalizePatient(patient) {
         dept: patient.dept || patient.department || '',
         isDeaf: patient.is_deaf,
         allergy: patient.allergy_history,
+        triageStruct: patient.triage_struct || null,
     };
 }
 

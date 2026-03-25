@@ -104,7 +104,9 @@ def get_doctor_by_id(db: Session, doctor_id: int):
     return db.query(models.Doctor).filter(models.Doctor.id == doctor_id).first()
 
 def get_patient_registrations(db: Session, patient_id: int):
-    return db.query(models.Registration).filter(models.Registration.patient_id == patient_id).all()
+    return db.query(models.Registration).filter(
+        models.Registration.patient_id == patient_id
+    ).order_by(models.Registration.created_at.desc(), models.Registration.id.desc()).all()
 
 def get_active_departments(db: Session):
     return db.query(models.Department).filter(models.Department.is_active == True).all()

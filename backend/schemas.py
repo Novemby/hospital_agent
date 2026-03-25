@@ -1,6 +1,6 @@
 from datetime import date
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from enum import Enum
 
 # 医生登录
@@ -26,6 +26,7 @@ class PatientOut(BaseModel):
     allergy_history: Optional[str] = None
     is_deaf: bool
     dept: Optional[str] = None   # 最近挂号科室
+    triage_struct: Optional[Dict[str, Any]] = None  # Agent结构化分诊槽位（若有）
 
 class PatientLoginOut(BaseModel):
     id: int

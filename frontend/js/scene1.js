@@ -25,7 +25,11 @@ const app = createApp({
 
         // 挂号 Agent 文本会话
         const agentSessionId = ref(`reg-${Date.now()}`);
+        const sessionId = ref(`session_${Date.now()}`);
+        const agentReply = ref('你好，我是挂号助手。你可以说：我想挂发热门诊。');
         const agentInputText = ref('');
+        const streamText = ref('');
+        const triageResult = ref(null);
         const agentMessages = ref([
             { role: 'assistant', content: '你好，我是挂号助手。你可以说：我想挂发热门诊。' }
         ]);
@@ -202,6 +206,7 @@ const app = createApp({
                 setCurrentPatient(backendData);
                 currentId.value = backendData.id;
                 agentSessionId.value = `reg-${backendData.id}-${Date.now()}`;
+                sessionId.value = `session_${backendData.id}_${Date.now()}`;
                 idCardInput.value = '';
                 view.value = 'reg-home';
             } catch (error) {
@@ -323,7 +328,7 @@ const app = createApp({
                 alert(error.message || '挂号失败，请稍后再试');
             }
         };
-        const sendAgentMessage = async (text) => {
+        const sendToAgent = async (text) => {
             const content = (text || '').trim();
             if (!content || !currentId.value) return;
 
@@ -331,26 +336,42 @@ const app = createApp({
             agentLoading.value = true;
 
             try {
-                const response = await fetch(`${API_BASE_URL}/agent/register/chat`, {
+                const response = await fetch('http://localhost:8000/api/agent/register/chat', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        session_id: agentSessionId.value,
-                        patient_id: Number(currentId.value),
-                        message: content
-                    })
+                        session_id: sessionId.value,
+                        patient_id: parseInt(currentId.value),
+                        message: content,
+                    }),
                 });
 
-                const result = await response.json();
+                const data = await response.json();
                 if (!response.ok) {
-                    throw new Error(result.detail || 'Agent 请求失败');
+                    throw new Error(data.detail || 'Agent 请求失败');
                 }
 
-                agentMessages.value.push({ role: 'assistant', content: result.reply || '收到。' });
-                agentState.value = result.state || agentState.value;
-                agentOptions.value = Array.isArray(result.options) ? result.options : [];
+                agentReply.value = data.reply || '收到。';
+                agentOptions.value = Array.isArray(data.options) ? data.options : [];
+                agentState.value = data.state || agentState.value;
+                agentMessages.value.push({ role: 'assistant', content: agentReply.value });
+
+                if (data?.slots?.department) {
+                    triageResult.value = {
+                        department: data.slots.department,
+                        date: data.slots.date || null,
+                        period: data.slots.period || null,
+                    };
+                }
+
+                if (data.state === 'SUCCESS') {
+                    alert(data.reply || '挂号成功');
+                    view.value = 'reg-home';
+                }
             } catch (error) {
-                agentMessages.value.push({ role: 'assistant', content: `请求失败：${error.message || '网络异常'}` });
+                const errMsg = `请求失败：${error.message || '网络异常'}`;
+                agentReply.value = errMsg;
+                agentMessages.value.push({ role: 'assistant', content: errMsg });
             } finally {
                 agentLoading.value = false;
                 agentInputText.value = '';
@@ -358,27 +379,24 @@ const app = createApp({
         };
 
         const sendAgentInput = async () => {
-            await sendAgentMessage(agentInputText.value);
+            await sendToAgent(agentInputText.value);
+        };
+
+        const clickOption = async (option) => {
+            const text = typeof option === 'string'
+                ? option
+                : (option?.period || option?.department || option?.doctor_name || '确认');
+            streamText.value = text;
+            await sendToAgent(text);
         };
 
         const clickAgentOption = async (option) => {
-            if (typeof option === 'string') {
-                await sendAgentMessage(option);
-                return;
-            }
-            if (option?.period) {
-                await sendAgentMessage(option.period);
-                return;
-            }
-            if (option?.department) {
-                await sendAgentMessage(option.department);
-                return;
-            }
-            if (option?.doctor_name) {
-                await sendAgentMessage(`选择${option.doctor_name}`);
-                return;
-            }
-            await sendAgentMessage('确认');
+            await clickOption(option);
+        };
+
+        const startScanning = async () => {
+            streamText.value = '我感觉左边肩膀有点酸痛，想挂号';
+            await sendToAgent(streamText.value);
         };
 
         const quickTakeNumber = () => {
@@ -540,13 +558,14 @@ const app = createApp({
             view, currentId, idCardInput, currentPatientName, vueWordSequence,
             showChat,
             isRecordingVoice, voiceText, recognizedText, chatMessages,
-            agentInputText, agentMessages, agentState, agentOptions, agentLoading,
+            sessionId, agentReply, agentInputText, streamText, triageResult,
+            agentMessages, agentState, agentOptions, agentLoading,
             showAppointmentModal, appointmentStep,
             departmentOptions, selectedDepartment, selectedDate,
             slotOptions, selectedSlotId, loadingSlots,
             goToRoleSelect, patientLogin, logout,
             quickAppointment, closeAppointmentModal, loadSlotOptions, submitAppointment,
-            sendAgentInput, clickAgentOption, sendAgentMessage,
+            sendAgentInput, clickOption, clickAgentOption, sendToAgent, startScanning,
             quickTakeNumber, quickPayment,
             goToSignTriage, goBack,
             startCamera, toggleRecording, cameraStarted, recordDisabled,
@@ -728,29 +747,38 @@ const app = createApp({
                                         </div>
                                     </div>
 
-                                    <div class="bg-orange-50 rounded-xl p-4">
+                                    <div class="bg-orange-50 rounded-xl p-4 space-y-3">
                                         <div class="text-sm text-gray-600 flex items-center justify-between">
-                                            <span>助手回复（状态：{{ agentState }}）</span>
+                                            <span>🤖 导诊助手（状态：{{ agentState }}）</span>
                                             <span class="text-xs" v-if="agentLoading">发送中...</span>
                                         </div>
-                                        <div class="mt-2 max-h-44 overflow-y-auto space-y-2">
+
+                                        <div class="bg-white rounded-xl p-4 text-center">
+                                            <div class="text-lg md:text-xl font-semibold text-gray-800 leading-relaxed">{{ agentReply }}</div>
+                                        </div>
+
+                                        <div class="mt-2 flex gap-2">
+                                            <input v-model="agentInputText" @keyup.enter="sendAgentInput" placeholder="描述症状" class="flex-1 border rounded-lg px-3 py-2 text-sm" />
+                                            <button @click="sendAgentInput" class="bg-blue-600 text-white px-3 py-2 rounded-lg text-sm hover:bg-blue-700">发送</button>
+                                            <button @click="startScanning" class="bg-indigo-600 text-white px-3 py-2 rounded-lg text-sm hover:bg-indigo-700">模拟识别</button>
+                                        </div>
+
+                                        <div class="flex flex-wrap gap-2" v-if="agentOptions && agentOptions.length">
+                                            <button
+                                                v-for="(op, idx) in agentOptions"
+                                                :key="idx"
+                                                @click="clickOption(op)"
+                                                class="px-3 py-1.5 rounded-full border border-blue-400 text-blue-700 bg-white hover:bg-blue-50 transition-colors text-sm"
+                                            >
+                                                {{ typeof op === 'string' ? op : (op.period || op.department || op.doctor_name || '确认') }}
+                                            </button>
+                                        </div>
+
+                                        <div class="mt-1 max-h-32 overflow-y-auto space-y-2">
                                             <div v-for="(msg, i) in agentMessages" :key="i" class="text-sm">
                                                 <div v-if="msg.role === 'assistant'" class="bg-white rounded-lg p-2 text-gray-700">🤖 {{ msg.content }}</div>
                                                 <div v-else class="bg-blue-600 text-white rounded-lg p-2 ml-8">我：{{ msg.content }}</div>
                                             </div>
-                                        </div>
-                                        <div class="mt-3 flex gap-2">
-                                            <input v-model="agentInputText" @keyup.enter="sendAgentInput" placeholder="输入：我想挂发热门诊" class="flex-1 border rounded-lg px-3 py-2 text-sm" />
-                                            <button @click="sendAgentInput" class="bg-blue-600 text-white px-3 py-2 rounded-lg text-sm hover:bg-blue-700">发送</button>
-                                        </div>
-                                        <div class="mt-3 flex flex-wrap gap-2" v-if="agentOptions && agentOptions.length">
-                                            <button v-for="(op, idx) in agentOptions" :key="idx" @click="clickAgentOption(op)" class="text-xs px-3 py-1 rounded-full bg-white border hover:bg-blue-50">
-                                                {{ typeof op === 'string' ? op : (op.period || op.department || op.doctor_name || '确认') }}
-                                            </button>
-                                        </div>
-                                        <div class="mt-3 text-center">
-                                            <div class="text-2xl font-bold text-orange-600">{{ currentWord }}</div>
-                                            <div class="text-xs text-gray-500 mt-1">识别置信度：{{ currentConfidence }}</div>
                                         </div>
                                     </div>
 

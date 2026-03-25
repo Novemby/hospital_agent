@@ -1,3 +1,5 @@
+import json
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from typing import Optional
@@ -20,17 +22,25 @@ def get_patients(dept: Optional[str] = Query(None), db: Session = Depends(get_db
     for p in patients:
         latest_reg = crud.get_patient_registrations(db, p.id)
         dept_name = latest_reg[0].department if latest_reg else None
-        # 删除 gender_str 和 birth_date_str，直接使用 p.gender 和 p.birth_date
+        triage_struct = None
+        if latest_reg and latest_reg[0].triage_symptoms:
+            try:
+                parsed = json.loads(latest_reg[0].triage_symptoms)
+                triage_struct = parsed if isinstance(parsed, dict) else None
+            except Exception:
+                triage_struct = None
+
         result.append({
             "id": p.id,
             "name": p.name,
-            "gender": p.gender,  # 整数 0/1 等
-            "birth_date": p.birth_date,  # date 对象或 None
+            "gender": p.gender,
+            "birth_date": p.birth_date,
             "contact_phone": p.contact_phone,
             "id_card": p.id_card,
             "allergy_history": p.allergy_history,
             "is_deaf": p.is_deaf,
             "dept": dept_name,
+            "triage_struct": triage_struct,
         })
     return result
 

@@ -9,13 +9,21 @@ class Settings:
     BAIDU_SPEECH_URL: str = "https://vop.baidu.com/server_api"
 
     # 科室相关
-    DEPARTMENTS: List[str] = ["骨科", "发热门诊", "体检中心", "耳鼻喉科", "内科"]
+    DEPARTMENTS: List[str] = [
+        "骨科", "发热门诊", "体检中心", "耳鼻喉科", "内科",
+        "外科", "儿科", "妇科", "神经内科", "皮肤科"
+    ]
     DEPARTMENT_CODE_MAP = {
         "骨科": "GK",
         "发热门诊": "FR",
         "体检中心": "TJ",
         "耳鼻喉科": "EBH",
         "内科": "NK",
+        "外科": "WK",
+        "儿科": "EK",
+        "妇科": "FK",
+        "神经内科": "SNK",
+        "皮肤科": "PFK",
     }
 
 settings = Settings()
