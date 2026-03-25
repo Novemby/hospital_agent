@@ -4,3 +4,6 @@ sqlalchemy==2.0.36
 pymysql==1.1.1
 pydantic==2.9.2
 python-multipart==0.0.12
+langchain==0.3.7
+langchain-core==0.3.18
+langchain-openai==0.2.8
