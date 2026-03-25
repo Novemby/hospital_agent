@@ -23,6 +23,16 @@ const app = createApp({
         // 新增：聊天消息列表（用于展示发送的消息）
         const chatMessages = ref([]);
 
+        // 挂号 Agent 文本会话
+        const agentSessionId = ref(`reg-${Date.now()}`);
+        const agentInputText = ref('');
+        const agentMessages = ref([
+            { role: 'assistant', content: '你好，我是挂号助手。你可以说：我想挂发热门诊。' }
+        ]);
+        const agentState = ref('INIT');
+        const agentOptions = ref([]);
+        const agentLoading = ref(false);
+
         // 手语 agent
         const agent = new SignLanguageAgent({
             apiUrl: 'http://localhost:8000',
@@ -191,6 +201,7 @@ const app = createApp({
                 }
                 setCurrentPatient(backendData);
                 currentId.value = backendData.id;
+                agentSessionId.value = `reg-${backendData.id}-${Date.now()}`;
                 idCardInput.value = '';
                 view.value = 'reg-home';
             } catch (error) {
@@ -312,6 +323,64 @@ const app = createApp({
                 alert(error.message || '挂号失败，请稍后再试');
             }
         };
+        const sendAgentMessage = async (text) => {
+            const content = (text || '').trim();
+            if (!content || !currentId.value) return;
+
+            agentMessages.value.push({ role: 'user', content });
+            agentLoading.value = true;
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/agent/register/chat`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        session_id: agentSessionId.value,
+                        patient_id: Number(currentId.value),
+                        message: content
+                    })
+                });
+
+                const result = await response.json();
+                if (!response.ok) {
+                    throw new Error(result.detail || 'Agent 请求失败');
+                }
+
+                agentMessages.value.push({ role: 'assistant', content: result.reply || '收到。' });
+                agentState.value = result.state || agentState.value;
+                agentOptions.value = Array.isArray(result.options) ? result.options : [];
+            } catch (error) {
+                agentMessages.value.push({ role: 'assistant', content: `请求失败：${error.message || '网络异常'}` });
+            } finally {
+                agentLoading.value = false;
+                agentInputText.value = '';
+            }
+        };
+
+        const sendAgentInput = async () => {
+            await sendAgentMessage(agentInputText.value);
+        };
+
+        const clickAgentOption = async (option) => {
+            if (typeof option === 'string') {
+                await sendAgentMessage(option);
+                return;
+            }
+            if (option?.period) {
+                await sendAgentMessage(option.period);
+                return;
+            }
+            if (option?.department) {
+                await sendAgentMessage(option.department);
+                return;
+            }
+            if (option?.doctor_name) {
+                await sendAgentMessage(`选择${option.doctor_name}`);
+                return;
+            }
+            await sendAgentMessage('确认');
+        };
+
         const quickTakeNumber = () => {
             alert(`现场取号成功，您前面还有 ${Math.floor(Math.random()*5)+1} 人`);
         };
@@ -471,11 +540,13 @@ const app = createApp({
             view, currentId, idCardInput, currentPatientName, vueWordSequence,
             showChat,
             isRecordingVoice, voiceText, recognizedText, chatMessages,
+            agentInputText, agentMessages, agentState, agentOptions, agentLoading,
             showAppointmentModal, appointmentStep,
             departmentOptions, selectedDepartment, selectedDate,
             slotOptions, selectedSlotId, loadingSlots,
             goToRoleSelect, patientLogin, logout,
             quickAppointment, closeAppointmentModal, loadSlotOptions, submitAppointment,
+            sendAgentInput, clickAgentOption, sendAgentMessage,
             quickTakeNumber, quickPayment,
             goToSignTriage, goBack,
             startCamera, toggleRecording, cameraStarted, recordDisabled,
@@ -643,29 +714,61 @@ const app = createApp({
 
                             <!-- 右侧：AI 交互区 + 人工帮助侧边栏（含聊天记录） -->
                             <div class="space-y-6">
-                                <!-- AI 交互框 -->
-                                <div class="bg-white rounded-2xl shadow-sm p-4 border border-blue-100">
-                                    <h2 class="text-lg font-bold mb-4 flex items-center gap-2">🤖 AI 助手</h2>
-                                    <!-- 当前识别结果 -->
-                                    <div class="current-word text-center p-6 bg-orange-50 rounded-xl mb-4">
-                                        <div class="label text-4xl font-bold text-orange-600">{{ currentWord }}</div>
-                                        <div class="confidence text-sm text-gray-500 mt-2">{{ currentConfidence }}</div>
+                                <!-- AI 交互框（重构：对话 + 进度 + 操作） -->
+                                <div class="bg-white rounded-2xl shadow-sm p-4 border border-blue-100 space-y-4">
+                                    <h2 class="text-lg font-bold flex items-center gap-2">🤖 AI 挂号助手</h2>
+
+                                    <div class="bg-slate-50 rounded-xl p-3">
+                                        <div class="text-xs text-gray-500 mb-2">任务进度</div>
+                                        <div class="grid grid-cols-2 gap-2 text-sm">
+                                            <div class="px-3 py-2 rounded-lg" :class="currentWord !== '-' ? 'bg-green-100 text-green-700' : 'bg-white text-gray-500'">1. 识别需求</div>
+                                            <div class="px-3 py-2 rounded-lg" :class="vueWordSequence.length > 0 ? 'bg-green-100 text-green-700' : 'bg-white text-gray-500'">2. 信息补全</div>
+                                            <div class="px-3 py-2 rounded-lg bg-white text-gray-500">3. 选择时段</div>
+                                            <div class="px-3 py-2 rounded-lg bg-white text-gray-500">4. 确认挂号</div>
+                                        </div>
                                     </div>
 
-                                    <!-- 已确认的表达 -->
-                                    <div class="sequence-section mt-4">
+                                    <div class="bg-orange-50 rounded-xl p-4">
+                                        <div class="text-sm text-gray-600 flex items-center justify-between">
+                                            <span>助手回复（状态：{{ agentState }}）</span>
+                                            <span class="text-xs" v-if="agentLoading">发送中...</span>
+                                        </div>
+                                        <div class="mt-2 max-h-44 overflow-y-auto space-y-2">
+                                            <div v-for="(msg, i) in agentMessages" :key="i" class="text-sm">
+                                                <div v-if="msg.role === 'assistant'" class="bg-white rounded-lg p-2 text-gray-700">🤖 {{ msg.content }}</div>
+                                                <div v-else class="bg-blue-600 text-white rounded-lg p-2 ml-8">我：{{ msg.content }}</div>
+                                            </div>
+                                        </div>
+                                        <div class="mt-3 flex gap-2">
+                                            <input v-model="agentInputText" @keyup.enter="sendAgentInput" placeholder="输入：我想挂发热门诊" class="flex-1 border rounded-lg px-3 py-2 text-sm" />
+                                            <button @click="sendAgentInput" class="bg-blue-600 text-white px-3 py-2 rounded-lg text-sm hover:bg-blue-700">发送</button>
+                                        </div>
+                                        <div class="mt-3 flex flex-wrap gap-2" v-if="agentOptions && agentOptions.length">
+                                            <button v-for="(op, idx) in agentOptions" :key="idx" @click="clickAgentOption(op)" class="text-xs px-3 py-1 rounded-full bg-white border hover:bg-blue-50">
+                                                {{ typeof op === 'string' ? op : (op.period || op.department || op.doctor_name || '确认') }}
+                                            </button>
+                                        </div>
+                                        <div class="mt-3 text-center">
+                                            <div class="text-2xl font-bold text-orange-600">{{ currentWord }}</div>
+                                            <div class="text-xs text-gray-500 mt-1">识别置信度：{{ currentConfidence }}</div>
+                                        </div>
+                                    </div>
+
+                                    <div>
                                         <h3 class="font-medium mb-2">📝 已确认的表达</h3>
-                                        <div class="word-sequence flex flex-wrap gap-2 min-h-[50px] p-3 bg-gray-50 rounded-lg">
+                                        <div class="word-sequence flex flex-wrap gap-2 min-h-[56px] p-3 bg-gray-50 rounded-lg">
                                             <span v-if="vueWordSequence.length === 0" class="placeholder text-gray-400">通过手语识别后，点头确认添加</span>
                                             <span v-for="(word, idx) in vueWordSequence" :key="idx" class="word-tag bg-green-100 px-3 py-1 rounded-full text-sm">
                                                 {{ word }}
                                                 <button @click="agent.deleteWord(idx)" class="ml-2 text-red-500 hover:text-red-700">&times;</button>
                                             </span>
                                         </div>
-                                        <div class="flex justify-end gap-2 mt-3">
-                                            <button @click="clearSequence" class="text-sm text-gray-500 hover:text-gray-700">清空</button>
-                                            <button @click="polishSequence" class="text-sm bg-indigo-50 text-indigo-600 px-3 py-1 rounded-full hover:bg-indigo-100">✨ 润色并分诊</button>
-                                        </div>
+                                    </div>
+
+                                    <div class="flex flex-wrap gap-2 justify-end">
+                                        <button @click="clearSequence" class="text-sm text-gray-600 px-3 py-1 rounded-lg border hover:bg-gray-50">清空表达</button>
+                                        <button @click="polishSequence" class="text-sm bg-indigo-50 text-indigo-600 px-3 py-1 rounded-lg hover:bg-indigo-100">✨ 润色分诊</button>
+                                        <button @click="quickAppointment" class="text-sm bg-blue-600 text-white px-3 py-1 rounded-lg hover:bg-blue-700">去预约挂号</button>
                                     </div>
                                 </div>
 
