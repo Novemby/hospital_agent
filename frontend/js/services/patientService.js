@@ -65,7 +65,7 @@ function normalizePatient(patient) {
 
 // 从后端获取患者列表并更新本地存储（合并更新，保留本地数据）
 async function syncPatientsFromBackend(dept = null) {
-    let url = `${API_BASE_URL}/patients`;
+    let url = `${API_BASE_URL}/patients/`;
     if (dept) {
         url += `?dept=${encodeURIComponent(dept)}`;
     }

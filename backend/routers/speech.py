@@ -1,5 +1,5 @@
 from fastapi import APIRouter, UploadFile, File, HTTPException
-from ..utils import audio_utils, baidu_tts
+from backend.utils import audio_utils, baidu_tts
 from .. import schemas
 
 router = APIRouter(tags=["speech"])

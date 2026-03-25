@@ -16,7 +16,6 @@
         }
     </script>
     <style>
-        /* 复用 scene1.css 样式，或内联 */
         body {
             background: #f1f5f9;
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
@@ -41,21 +40,5 @@
 <body class="p-6">
     <div id="app"></div>
     <script type="module" src="./js/handsign_assist.js"></script>
-    <!-- 在合适位置添加医生消息窗口 -->
-    <div class="doctor-messages-panel bg-white rounded-2xl shadow-sm p-4 mt-4">
-        <h3 class="font-bold text-lg mb-3 flex items-center gap-2">
-            <span>👨‍⚕️</span> 医生消息
-        </h3>
-        <div id="doctorMessagesList" class="space-y-2 max-h-80 overflow-y-auto">
-            <!-- 消息动态渲染 -->
-            <div v-if="doctorMessages.length === 0" class="text-gray-400 text-center py-4">
-                暂无医生消息
-            </div>
-            <div v-for="msg in doctorMessages" :key="msg.id" class="bg-blue-50 p-3 rounded-lg">
-                <div class="text-sm text-blue-800">{{ msg.content }}</div>
-                <div class="text-xs text-gray-400 mt-1">{{ formatTime(msg.created_at) }}</div>
-            </div>
-        </div>
-    </div>
 </body>
 </html>
