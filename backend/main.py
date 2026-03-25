@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from .database import engine, Base
-from .routers import patients, doctors, registrations, agent, speech
+from backend.database import engine, Base
+from backend.routers import patients, doctors, registrations, agent, speech
 
 # 创建数据库表（生产环境应使用 Alembic）
 Base.metadata.create_all(bind=engine)

@@ -224,7 +224,7 @@ const app = createApp({
             doctorMessages,
             formatTime,
             // 辅助
-            agent // 用于模板中可能的事件绑定
+            agent
         };
     },
     template: `
@@ -312,3 +312,4 @@ const app = createApp({
 });
 
 app.mount('#app');
+console.log('✅ Vue 应用已挂载');
