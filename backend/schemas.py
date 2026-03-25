@@ -1,3 +1,4 @@
+from datetime import date
 from pydantic import BaseModel
 from typing import Optional, List
 from enum import Enum
@@ -18,10 +19,10 @@ class DoctorOut(BaseModel):
 class PatientOut(BaseModel):
     id: int
     name: str
-    gender: str
-    birth_date: str
+    gender: int
+    birth_date: Optional[date] = None
     contact_phone: Optional[str] = None
-    id_card: str
+    id_card: Optional[str] = None
     allergy_history: Optional[str] = None
     is_deaf: bool
     dept: Optional[str] = None   # 最近挂号科室
