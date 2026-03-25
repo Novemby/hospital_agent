@@ -14,9 +14,6 @@ DROP TABLE IF EXISTS sys_doctor;
 DROP TABLE IF EXISTS sys_patient;
 SET FOREIGN_KEY_CHECKS = 1;
 
-CREATE DATABASE IF NOT EXISTS medical_agent_db DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-USE medical_agent_db;
-
 -- 表结构
 CREATE TABLE IF NOT EXISTS sys_patient (
     id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '患者唯一标识符',
@@ -132,7 +129,28 @@ TRUNCATE TABLE sys_doctor;
 TRUNCATE TABLE sys_patient;
 SET FOREIGN_KEY_CHECKS = 1;
 
--- 插入医生测试数据（每个科室2名）
+-- 插入科室与排班测试数据 (总计 18 个科室)
+INSERT INTO sys_department (id, dept_code, dept_name, is_active) VALUES
+(1, 'GK', '骨科', 1),
+(2, 'FR', '发热门诊', 1),
+(3, 'TJ', '体检中心', 1),
+(4, 'EBH', '耳鼻喉科', 1),
+(5, 'NK', '内科', 1),
+(6, 'WK', '外科', 1),
+(7, 'EK', '儿科', 1),
+(8, 'FK', '妇科', 1),
+(9, 'SNK', '神经内科', 1),
+(10, 'PFK', '皮肤科', 1),
+(11, 'XWNK', '消化内科', 1),
+(12, 'HXNK', '呼吸内科', 1),
+(13, 'XXGNK', '心血管内科', 1),
+(14, 'MNWK', '泌尿外科', 1),
+(15, 'YK', '眼科', 1),
+(16, 'KQK', '口腔科', 1),
+(17, 'JSXLK', '精神心理科', 1),
+(18, 'JZK', '急诊科', 1);
+
+-- 插入医生测试数据（每个科室2名医生，共计36名）
 INSERT INTO sys_doctor (id, work_no, name, department, title, is_available, password) VALUES
 (1, 'd001', '张伟', '骨科', '主任医师', 1, '123456'),
 (2, 'd002', '刘洋', '骨科', '主治医师', 1, '123456'),
@@ -153,7 +171,23 @@ INSERT INTO sys_doctor (id, work_no, name, department, title, is_available, pass
 (17, 'd017', '蒋涛', '神经内科', '主任医师', 1, '123456'),
 (18, 'd018', '韩雪', '神经内科', '主治医师', 1, '123456'),
 (19, 'd019', '彭伟', '皮肤科', '副主任医师', 1, '123456'),
-(20, 'd020', '罗敏', '皮肤科', '主治医师', 1, '123456');
+(20, 'd020', '罗敏', '皮肤科', '主治医师', 1, '123456'),
+(21, 'd021', '苏强', '消化内科', '主任医师', 1, '123456'),
+(22, 'd022', '林婉', '消化内科', '主治医师', 1, '123456'),
+(23, 'd023', '高健', '呼吸内科', '副主任医师', 1, '123456'),
+(24, 'd024', '叶萍', '呼吸内科', '主治医师', 1, '123456'),
+(25, 'd025', '顾城', '心血管内科', '主任医师', 1, '123456'),
+(26, 'd026', '孟洁', '心血管内科', '主治医师', 1, '123456'),
+(27, 'd027', '梁宇', '泌尿外科', '副主任医师', 1, '123456'),
+(28, 'd028', '许晴', '泌尿外科', '主治医师', 1, '123456'),
+(29, 'd029', '方明', '眼科', '主任医师', 1, '123456'),
+(30, 'd030', '董越', '眼科', '主治医师', 1, '123456'),
+(31, 'd031', '陆毅', '口腔科', '副主任医师', 1, '123456'),
+(32, 'd032', '沈瑶', '口腔科', '主治医师', 1, '123456'),
+(33, 'd033', '白涛', '精神心理科', '主任医师', 1, '123456'),
+(34, 'd034', '夏雪', '精神心理科', '主治医师', 1, '123456'),
+(35, 'd035', '雷霆', '急诊科', '副主任医师', 1, '123456'),
+(36, 'd036', '莫愁', '急诊科', '主治医师', 1, '123456');
 
 -- 插入患者测试数据
 SET NAMES utf8mb4;
@@ -162,19 +196,7 @@ INSERT INTO sys_patient (id, name, gender, birth_date, contact_phone, id_card, a
 (1002, '李四', 1, '1992-08-20', '13900139002', '234567', '青霉素', 0),
 (1003, '王五', 1, '1985-11-11', '13700137003', '345678', '无', 0);
 
--- 插入科室与排班测试数据
-INSERT INTO sys_department (id, dept_code, dept_name, is_active) VALUES
-(1, 'GK', '骨科', 1),
-(2, 'FR', '发热门诊', 1),
-(3, 'TJ', '体检中心', 1),
-(4, 'EBH', '耳鼻喉科', 1),
-(5, 'NK', '内科', 1),
-(6, 'WK', '外科', 1),
-(7, 'EK', '儿科', 1),
-(8, 'FK', '妇科', 1),
-(9, 'SNK', '神经内科', 1),
-(10, 'PFK', '皮肤科', 1);
-
+-- 每个科室两人，分别负责上午和下午的排班号源
 INSERT INTO biz_schedule (id, department_id, doctor_id, schedule_date, time_period, capacity_total, capacity_used, is_open) VALUES
 (20001, 1, 1, CURDATE(), 'AM', 50, 1, 1),
 (20002, 1, 2, CURDATE(), 'PM', 50, 3, 1),
@@ -195,7 +217,23 @@ INSERT INTO biz_schedule (id, department_id, doctor_id, schedule_date, time_peri
 (20017, 9, 17, CURDATE(), 'AM', 35, 2, 1),
 (20018, 9, 18, CURDATE(), 'PM', 35, 2, 1),
 (20019, 10, 19, CURDATE(), 'AM', 30, 2, 1),
-(20020, 10, 20, CURDATE(), 'PM', 30, 2, 1);
+(20020, 10, 20, CURDATE(), 'PM', 30, 2, 1),
+(20021, 11, 21, CURDATE(), 'AM', 40, 5, 1),
+(20022, 11, 22, CURDATE(), 'PM', 40, 2, 1),
+(20023, 12, 23, CURDATE(), 'AM', 35, 4, 1),
+(20024, 12, 24, CURDATE(), 'PM', 35, 1, 1),
+(20025, 13, 25, CURDATE(), 'AM', 30, 6, 1),
+(20026, 13, 26, CURDATE(), 'PM', 30, 2, 1),
+(20027, 14, 27, CURDATE(), 'AM', 25, 1, 1),
+(20028, 14, 28, CURDATE(), 'PM', 25, 0, 1),
+(20029, 15, 29, CURDATE(), 'AM', 40, 8, 1),
+(20030, 15, 30, CURDATE(), 'PM', 40, 3, 1),
+(20031, 16, 31, CURDATE(), 'AM', 30, 2, 1),
+(20032, 16, 32, CURDATE(), 'PM', 30, 1, 1),
+(20033, 17, 33, CURDATE(), 'AM', 20, 1, 1),
+(20034, 17, 34, CURDATE(), 'PM', 20, 0, 1),
+(20035, 18, 35, CURDATE(), 'AM', 50, 10, 1),
+(20036, 18, 36, CURDATE(), 'PM', 50, 5, 1);
 
 -- 插入挂号流水数据
 INSERT INTO biz_registration (id, patient_id, department_id, schedule_id, department, queue_number, current_state, triage_symptoms) VALUES
@@ -211,4 +249,3 @@ INSERT INTO biz_chat_message (registration_id, sender_type, content) VALUES
 (10001, 'pat', '[手语主诉] 我感觉左边肩膀酸疼得很厉害，手抬不起来，已经持续一周了。'),
 (10001, 'doc', '是活动时疼痛加重，还是休息时也疼？'),
 (10001, 'pat', '[手语] 抬手的时候特别疼，晚上睡觉有时也会疼醒。');
-

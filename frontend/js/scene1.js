@@ -1,4 +1,4 @@
-import { createApp, ref, computed, watch, onUnmounted } from 'vue';
+import { createApp, ref, computed, watch, onUnmounted, nextTick } from 'vue';
 import { getPatientById, upsertPatient } from './services/patientService.js';
 import { patientLoginAPI, setCurrentPatient, getCurrentPatient, clearAuth } from './services/authService.js';
 import { SignLanguageAgent } from './services/signLanguageAgent.js';
@@ -20,18 +20,22 @@ const app = createApp({
         let mediaRecorder = null;
         let audioChunks = [];
 
-        // 新增：聊天消息列表（用于展示发送的消息）
+        // 聊天消息列表（用于展示发送的消息）
         const chatMessages = ref([]);
+        const chatContainer = ref(null); // 对话框滚动锚点
 
         // 挂号 Agent 文本会话
         const agentSessionId = ref(`reg-${Date.now()}`);
         const sessionId = ref(`session_${Date.now()}`);
-        const agentReply = ref('你好，我是挂号助手。你可以说：我想挂发热门诊。');
+        const agentReply = ref('你好，我是挂号助手。你可以说：我想挂发热门诊，或者向我描述你的不适。');
         const agentInputText = ref('');
         const streamText = ref('');
         const triageResult = ref(null);
+        // 🌟 新增：存储后端传回的 JSON 结构化症状，用于实时卡片渲染
+        const parsedSymptoms = ref({});
+
         const agentMessages = ref([
-            { role: 'assistant', content: '你好，我是挂号助手。你可以说：我想挂发热门诊。' }
+            { role: 'assistant', content: '你好，我是挂号助手。你可以说：我想挂发热门诊，或者向我描述你的不适。' }
         ]);
         const agentState = ref('INIT');
         const agentOptions = ref([]);
@@ -41,10 +45,8 @@ const app = createApp({
         const agent = new SignLanguageAgent({
             apiUrl: 'http://localhost:8000',
             onResult: (result) => {
-                // 更新识别结果显示
                 currentWord.value = result.prediction;
                 currentConfidence.value = `${(result.confidence * 100).toFixed(1)}%`;
-                // 如果有候选词，启动头部动作监听（取 top1 为默认推荐）
                 if (result.topPredictions && result.topPredictions.length) {
                     currentCandidates.value = result.topPredictions;
                     currentCandidateIndex.value = 0;
@@ -67,7 +69,6 @@ const app = createApp({
                 } else if (status === 'resultReady') {
                     statusText.value = '请点头确认，或摇头切换候选词';
                     overlayText.value = data.prediction;
-                    // 启动头部动作等待（超时自动取消）
                     startHeadGestureWaiting();
                 } else if (status === 'tooShort') {
                     statusText.value = '时间有点短，请再比划一次 😊';
@@ -84,7 +85,6 @@ const app = createApp({
             onHeadGesture: (gesture) => {
                 if (!waitingForHeadGesture.value) return;
                 if (gesture.type === 'nod') {
-                    // 点头：确认当前候选词
                     const currentCandidate = currentCandidates.value[currentCandidateIndex.value];
                     if (currentCandidate) {
                         agent.confirmWord(currentCandidate.label);
@@ -93,16 +93,14 @@ const app = createApp({
                         statusText.value = '✅ 已确认！';
                     }
                 } else if (gesture.type === 'shake') {
-                    // 摇头：切换到下一个候选词
                     if (currentCandidates.value.length > 1) {
                         let nextIdx = currentCandidateIndex.value + 1;
-                        if (nextIdx >= currentCandidates.value.length) nextIdx = 0; // 循环
+                        if (nextIdx >= currentCandidates.value.length) nextIdx = 0;
                         currentCandidateIndex.value = nextIdx;
                         const newCandidate = currentCandidates.value[nextIdx];
                         currentWord.value = newCandidate.label;
                         currentConfidence.value = `${(newCandidate.confidence * 100).toFixed(1)}%`;
                         statusText.value = `切换到「${newCandidate.label}」，点头确认，摇头继续切换`;
-                        // 重置超时计时
                         resetHeadGestureTimeout();
                     } else {
                         statusText.value = '仅有一个候选词，请点头确认或重新识别';
@@ -118,7 +116,6 @@ const app = createApp({
         const startHeadGestureWaiting = () => {
             waitingForHeadGesture.value = true;
             agent.enableHeadGesture(true);
-            // 设置超时，如果10秒内无动作，自动放弃并提示
             headGestureTimeout = setTimeout(() => {
                 if (waitingForHeadGesture.value) {
                     waitingForHeadGesture.value = false;
@@ -161,7 +158,7 @@ const app = createApp({
 
         // 挂号弹窗状态
         const showAppointmentModal = ref(false);
-        const appointmentStep = ref(1); // 1:选科室 2:选日期时段
+        const appointmentStep = ref(1);
         const departmentOptions = ref([]);
         const selectedDepartment = ref('');
         const selectedDate = ref(new Date().toISOString().slice(0, 10));
@@ -169,7 +166,6 @@ const app = createApp({
         const selectedSlotId = ref(null);
         const loadingSlots = ref(false);
 
-        // 当前患者姓名
         const currentPatientName = computed(() => {
             refreshKey.value;
             if (!currentId.value) return '';
@@ -245,9 +241,7 @@ const app = createApp({
             try {
                 const deptResp = await fetch(`${API_BASE_URL}/registration/departments`);
                 const deptResult = await deptResp.json();
-                if (!deptResp.ok) {
-                    throw new Error(deptResult.detail || '获取科室列表失败');
-                }
+                if (!deptResp.ok) throw new Error(deptResult.detail || '获取科室列表失败');
                 departmentOptions.value = deptResult.departments || [];
                 if (departmentOptions.value.length > 0) {
                     selectedDepartment.value = departmentOptions.value[0];
@@ -273,14 +267,10 @@ const app = createApp({
             try {
                 const slotResp = await fetch(`${API_BASE_URL}/registration/slots?department=${encodeURIComponent(selectedDepartment.value)}&date=${encodeURIComponent(selectedDate.value)}`);
                 const slotResult = await slotResp.json();
-                if (!slotResp.ok) {
-                    throw new Error(slotResult.detail || '查询号源失败');
-                }
+                if (!slotResp.ok) throw new Error(slotResult.detail || '查询号源失败');
                 slotOptions.value = (slotResult.slots || []).filter(s => (s.remain || 0) > 0);
                 appointmentStep.value = 2;
-                if (!slotOptions.value.length) {
-                    alert('该日期暂无可用号源，请更换日期');
-                }
+                if (!slotOptions.value.length) alert('该日期暂无可用号源，请更换日期');
             } catch (error) {
                 alert(error.message || '查询号源失败');
             } finally {
@@ -294,10 +284,7 @@ const app = createApp({
                 return;
             }
             const selectedSlot = slotOptions.value.find(s => String(s.slot_id) === String(selectedSlotId.value));
-            if (!selectedSlot) {
-                alert('所选时段无效，请重新选择');
-                return;
-            }
+            if (!selectedSlot) return alert('所选时段无效，请重新选择');
 
             try {
                 const response = await fetch(`${API_BASE_URL}/registration/submit`, {
@@ -312,9 +299,7 @@ const app = createApp({
                 });
 
                 const result = await response.json();
-                if (!response.ok) {
-                    throw new Error(result.detail || '挂号失败');
-                }
+                if (!response.ok) throw new Error(result.detail || '挂号失败');
 
                 const patient = getPatientById(currentId.value);
                 if (patient) {
@@ -328,11 +313,20 @@ const app = createApp({
                 alert(error.message || '挂号失败，请稍后再试');
             }
         };
+
+        const scrollToBottom = async () => {
+            await nextTick();
+            if (chatContainer.value) {
+                chatContainer.value.scrollTop = chatContainer.value.scrollHeight;
+            }
+        };
+
         const sendToAgent = async (text) => {
             const content = (text || '').trim();
             if (!content || !currentId.value) return;
 
             agentMessages.value.push({ role: 'user', content });
+            scrollToBottom();
             agentLoading.value = true;
 
             try {
@@ -347,14 +341,21 @@ const app = createApp({
                 });
 
                 const data = await response.json();
-                if (!response.ok) {
-                    throw new Error(data.detail || 'Agent 请求失败');
-                }
+                if (!response.ok) throw new Error(data.detail || 'Agent 请求失败');
 
                 agentReply.value = data.reply || '收到。';
                 agentOptions.value = Array.isArray(data.options) ? data.options : [];
                 agentState.value = data.state || agentState.value;
                 agentMessages.value.push({ role: 'assistant', content: agentReply.value });
+
+                // 🌟 解析并渲染后端传来的结构化症状
+                if (data?.slots?.triage_symptoms) {
+                    try {
+                        parsedSymptoms.value = JSON.parse(data.slots.triage_symptoms);
+                    } catch (e) {
+                        console.warn('解析 triage_symptoms 失败:', e);
+                    }
+                }
 
                 if (data?.slots?.department) {
                     triageResult.value = {
@@ -364,14 +365,20 @@ const app = createApp({
                     };
                 }
 
+                scrollToBottom();
+
                 if (data.state === 'SUCCESS') {
-                    alert(data.reply || '挂号成功');
-                    view.value = 'reg-home';
+                    // 等待渲染完成后再提示成功
+                    setTimeout(() => {
+                        alert(data.reply || '挂号成功');
+                        view.value = 'reg-home';
+                    }, 500);
                 }
             } catch (error) {
                 const errMsg = `请求失败：${error.message || '网络异常'}`;
                 agentReply.value = errMsg;
                 agentMessages.value.push({ role: 'assistant', content: errMsg });
+                scrollToBottom();
             } finally {
                 agentLoading.value = false;
                 agentInputText.value = '';
@@ -390,10 +397,6 @@ const app = createApp({
             await sendToAgent(text);
         };
 
-        const clickAgentOption = async (option) => {
-            await clickOption(option);
-        };
-
         const startScanning = async () => {
             streamText.value = '我感觉左边肩膀有点酸痛，想挂号';
             await sendToAgent(streamText.value);
@@ -408,6 +411,9 @@ const app = createApp({
 
         const goToSignTriage = () => {
             view.value = 'sign-triage';
+            // 初始化清空上一次的状态
+            parsedSymptoms.value = {};
+            agentState.value = 'INIT';
         };
 
         const goBack = () => {
@@ -455,17 +461,14 @@ const app = createApp({
             }
         };
 
-        // ========== 人工帮助功能（修改后不再alert，而是显示在聊天区） ==========
         const sendPatientMessage = (text) => {
             if (!text.trim()) return;
-            // 添加到聊天消息列表
             chatMessages.value.push({
                 id: Date.now(),
                 text: text.trim(),
                 sender: 'patient',
                 time: new Date().toLocaleTimeString()
             });
-            // 清空输入框
             voiceText.value = '';
             recognizedText.value = '';
         };
@@ -556,23 +559,18 @@ const app = createApp({
 
         return {
             view, currentId, idCardInput, currentPatientName, vueWordSequence,
-            showChat,
-            isRecordingVoice, voiceText, recognizedText, chatMessages,
-            sessionId, agentReply, agentInputText, streamText, triageResult,
+            showChat, isRecordingVoice, voiceText, recognizedText, chatMessages, chatContainer,
+            sessionId, agentReply, agentInputText, streamText, triageResult, parsedSymptoms,
             agentMessages, agentState, agentOptions, agentLoading,
-            showAppointmentModal, appointmentStep,
-            departmentOptions, selectedDepartment, selectedDate,
+            showAppointmentModal, appointmentStep, departmentOptions, selectedDepartment, selectedDate,
             slotOptions, selectedSlotId, loadingSlots,
             goToRoleSelect, patientLogin, logout,
             quickAppointment, closeAppointmentModal, loadSlotOptions, submitAppointment,
-            sendAgentInput, clickOption, clickAgentOption, sendToAgent, startScanning,
-            quickTakeNumber, quickPayment,
-            goToSignTriage, goBack,
+            sendAgentInput, clickOption, sendToAgent, startScanning,
+            quickTakeNumber, quickPayment, goToSignTriage, goBack,
             startCamera, toggleRecording, cameraStarted, recordDisabled,
-            currentWord, currentConfidence,
-            statusText, overlayText, overlayClass,
-            clearSequence, polishSequence,
-            sendPatientMessage,
+            currentWord, currentConfidence, statusText, overlayText, overlayClass,
+            clearSequence, polishSequence, sendPatientMessage,
             toggleVoiceRecording, confirmVoiceText, cancelVoiceText
         };
     },
@@ -696,7 +694,7 @@ const app = createApp({
                 </div>
             </div>
 
-            <!-- 手语分诊页面 - 移除候选词列表，保留头部动作提示 -->
+            <!-- 手语分诊页面 -->
             <div v-if="view === 'sign-triage'" class="max-w-7xl mx-auto p-4">
                 <div class="bg-white rounded-3xl shadow-xl overflow-hidden">
                     <div class="bg-blue-600 p-4 text-white flex justify-between items-center">
@@ -729,122 +727,132 @@ const app = createApp({
                                 <div class="tips-box mt-3 p-3 bg-blue-50 rounded-lg text-xs text-gray-600">
                                     <strong>💡 小贴士：</strong> 光线充足、手部在胸前比划效果更好。识别后请面对摄像头做点头或摇头动作。
                                 </div>
+
+                                <!-- 🌟 优化一：实时症状感知卡片（消除虚无感） -->
+                                <div v-if="parsedSymptoms && parsedSymptoms.primary_symptom" class="bg-indigo-50 rounded-xl p-4 mt-4 border border-indigo-100 shadow-sm transition-all">
+                                    <h3 class="text-sm font-bold text-indigo-800 mb-2 flex items-center gap-1">✨ AI 实时感知病情摘要</h3>
+                                    <div class="grid grid-cols-2 gap-2 text-sm">
+                                        <div class="bg-white p-2 rounded border border-indigo-50 flex items-center justify-between">
+                                            <span class="text-gray-500">核心症状</span> 
+                                            <span class="font-medium text-gray-800">{{parsedSymptoms.primary_symptom}}</span>
+                                        </div>
+                                        <div class="bg-white p-2 rounded border border-indigo-50 flex items-center justify-between">
+                                            <span class="text-gray-500">具体部位</span> 
+                                            <span class="font-medium" :class="parsedSymptoms.body_part ? 'text-gray-800' : 'text-orange-500'">{{parsedSymptoms.body_part || '待确认'}}</span>
+                                        </div>
+                                        <div class="bg-white p-2 rounded border border-indigo-50 flex items-center justify-between">
+                                            <span class="text-gray-500">持续时间</span> 
+                                            <span class="font-medium" :class="parsedSymptoms.duration ? 'text-gray-800' : 'text-orange-500'">{{parsedSymptoms.duration || '待确认'}}</span>
+                                        </div>
+                                        <div class="bg-white p-2 rounded border border-indigo-50 flex items-center justify-between">
+                                            <span class="text-gray-500">推荐科室</span> 
+                                            <span class="font-bold" :class="triageResult?.department ? 'text-indigo-600' : 'text-gray-400'">{{triageResult?.department || '分析中...'}}</span>
+                                        </div>
+                                    </div>
+                                    <div v-if="parsedSymptoms.accompanying_symptoms && parsedSymptoms.accompanying_symptoms.length" class="mt-2 text-xs bg-white p-2 rounded border border-indigo-50">
+                                        <span class="text-gray-500 mr-2">伴随症状:</span>
+                                        <span v-for="sym in parsedSymptoms.accompanying_symptoms" :key="sym" class="inline-block bg-orange-100 text-orange-700 px-2 py-0.5 rounded mr-1 mb-1">{{sym}}</span>
+                                    </div>
+                                </div>
                             </div>
 
-                            <!-- 右侧：AI 交互区 + 人工帮助侧边栏（含聊天记录） -->
+                            <!-- 右侧：AI 交互区 + 人工帮助侧边栏 -->
                             <div class="space-y-6">
-                                <!-- AI 交互框（重构：对话 + 进度 + 操作） -->
-                                <div class="bg-white rounded-2xl shadow-sm p-4 border border-blue-100 space-y-4">
-                                    <h2 class="text-lg font-bold flex items-center gap-2">🤖 AI 挂号助手</h2>
+                                <!-- AI 交互框 -->
+                                <div class="bg-white rounded-2xl shadow-sm p-4 border border-blue-100 space-y-4 flex flex-col h-[650px]">
+                                    <h2 class="text-lg font-bold flex items-center gap-2 shrink-0">🤖 AI 挂号助手</h2>
 
-                                    <div class="bg-slate-50 rounded-xl p-3">
-                                        <div class="text-xs text-gray-500 mb-2">任务进度</div>
-                                        <div class="grid grid-cols-2 gap-2 text-sm">
-                                            <div class="px-3 py-2 rounded-lg" :class="currentWord !== '-' ? 'bg-green-100 text-green-700' : 'bg-white text-gray-500'">1. 识别需求</div>
-                                            <div class="px-3 py-2 rounded-lg" :class="vueWordSequence.length > 0 ? 'bg-green-100 text-green-700' : 'bg-white text-gray-500'">2. 信息补全</div>
-                                            <div class="px-3 py-2 rounded-lg bg-white text-gray-500">3. 选择时段</div>
-                                            <div class="px-3 py-2 rounded-lg bg-white text-gray-500">4. 确认挂号</div>
+                                    <!-- 🌟 优化二：状态机驱动的动态进度条 -->
+                                    <div class="bg-slate-50 rounded-xl p-3 shrink-0">
+                                        <div class="text-xs text-gray-500 mb-2">任务流转状态</div>
+                                        <div class="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs text-center">
+                                            <div class="px-2 py-1.5 rounded-lg font-medium transition-colors" :class="['INIT', 'COLLECT_INFO', 'QUERY_SLOTS', 'CONFIRM', 'SUCCESS'].includes(agentState) ? 'bg-green-100 text-green-700' : 'bg-white border text-gray-400'">1. 症状采录</div>
+                                            <div class="px-2 py-1.5 rounded-lg font-medium transition-colors" :class="['QUERY_SLOTS', 'CONFIRM', 'SUCCESS'].includes(agentState) ? 'bg-green-100 text-green-700' : 'bg-white border text-gray-400'">2. 智能分诊</div>
+                                            <div class="px-2 py-1.5 rounded-lg font-medium transition-colors" :class="['CONFIRM', 'SUCCESS'].includes(agentState) ? 'bg-green-100 text-green-700' : 'bg-white border text-gray-400'">3. 匹配时段</div>
+                                            <div class="px-2 py-1.5 rounded-lg font-medium transition-colors" :class="agentState === 'SUCCESS' ? 'bg-green-100 text-green-700' : 'bg-white border text-gray-400'">4. 确认挂号</div>
                                         </div>
                                     </div>
 
-                                    <div class="bg-orange-50 rounded-xl p-4 space-y-3">
-                                        <div class="text-sm text-gray-600 flex items-center justify-between">
+                                    <!-- 对话显示与互动区 -->
+                                    <div class="bg-orange-50 rounded-xl p-4 flex flex-col flex-1 overflow-hidden">
+                                        <div class="text-sm text-gray-600 flex items-center justify-between shrink-0 mb-3">
                                             <span>🤖 导诊助手（状态：{{ agentState }}）</span>
-                                            <span class="text-xs" v-if="agentLoading">发送中...</span>
+                                            <span class="text-xs" v-if="agentLoading">理解中...</span>
                                         </div>
 
-                                        <div class="bg-white rounded-xl p-4 text-center">
-                                            <div class="text-lg md:text-xl font-semibold text-gray-800 leading-relaxed">{{ agentReply }}</div>
+                                        <!-- 🌟 优化四：自动滚动的聊天气泡区 -->
+                                        <div ref="chatContainer" class="flex-1 overflow-y-auto space-y-3 mb-3 pr-2 scrollbar-thin">
+                                            <div v-for="(msg, i) in agentMessages" :key="i" class="flex w-full" :class="msg.role === 'user' ? 'justify-end' : 'justify-start'">
+                                                <div v-if="msg.role === 'assistant'" class="bg-white rounded-2xl rounded-tl-sm p-3 text-gray-800 shadow-sm max-w-[85%] text-sm leading-relaxed border border-orange-100">
+                                                    {{ msg.content }}
+                                                </div>
+                                                <div v-else class="bg-blue-600 text-white rounded-2xl rounded-tr-sm p-3 shadow-sm max-w-[85%] text-sm leading-relaxed">
+                                                    {{ msg.content }}
+                                                </div>
+                                            </div>
                                         </div>
 
-                                        <div class="mt-2 flex gap-2">
-                                            <input v-model="agentInputText" @keyup.enter="sendAgentInput" placeholder="描述症状" class="flex-1 border rounded-lg px-3 py-2 text-sm" />
-                                            <button @click="sendAgentInput" class="bg-blue-600 text-white px-3 py-2 rounded-lg text-sm hover:bg-blue-700">发送</button>
-                                            <button @click="startScanning" class="bg-indigo-600 text-white px-3 py-2 rounded-lg text-sm hover:bg-indigo-700">模拟识别</button>
-                                        </div>
-
-                                        <div class="flex flex-wrap gap-2" v-if="agentOptions && agentOptions.length">
+                                        <!-- 🌟 优化三：降噪处理的选项区域，防止 18 个科室撑爆屏幕 -->
+                                        <div class="flex flex-wrap gap-2 mb-3 max-h-32 overflow-y-auto shrink-0 scrollbar-thin" v-if="agentOptions && agentOptions.length && agentState !== 'SUCCESS'">
                                             <button
                                                 v-for="(op, idx) in agentOptions"
                                                 :key="idx"
                                                 @click="clickOption(op)"
-                                                class="px-3 py-1.5 rounded-full border border-blue-400 text-blue-700 bg-white hover:bg-blue-50 transition-colors text-sm"
+                                                class="px-4 py-1.5 rounded-full border border-blue-300 text-blue-700 bg-white hover:bg-blue-50 hover:border-blue-500 transition-colors text-sm shadow-sm"
                                             >
                                                 {{ typeof op === 'string' ? op : (op.period || op.department || op.doctor_name || '确认') }}
                                             </button>
                                         </div>
 
-                                        <div class="mt-1 max-h-32 overflow-y-auto space-y-2">
-                                            <div v-for="(msg, i) in agentMessages" :key="i" class="text-sm">
-                                                <div v-if="msg.role === 'assistant'" class="bg-white rounded-lg p-2 text-gray-700">🤖 {{ msg.content }}</div>
-                                                <div v-else class="bg-blue-600 text-white rounded-lg p-2 ml-8">我：{{ msg.content }}</div>
-                                            </div>
+                                        <div class="flex gap-2 shrink-0">
+                                            <input v-model="agentInputText" @keyup.enter="sendAgentInput" placeholder="直接打字描述..." class="flex-1 border-0 shadow-inner rounded-xl px-4 py-2 text-sm focus:ring-2 focus:ring-orange-300 outline-none" />
+                                            <button @click="sendAgentInput" class="bg-blue-600 text-white px-4 py-2 rounded-xl text-sm hover:bg-blue-700 font-medium">发送</button>
                                         </div>
                                     </div>
 
-                                    <div>
-                                        <h3 class="font-medium mb-2">📝 已确认的表达</h3>
-                                        <div class="word-sequence flex flex-wrap gap-2 min-h-[56px] p-3 bg-gray-50 rounded-lg">
-                                            <span v-if="vueWordSequence.length === 0" class="placeholder text-gray-400">通过手语识别后，点头确认添加</span>
-                                            <span v-for="(word, idx) in vueWordSequence" :key="idx" class="word-tag bg-green-100 px-3 py-1 rounded-full text-sm">
+                                    <div class="shrink-0">
+                                        <h3 class="font-medium mb-2 text-sm text-gray-600">📝 手语输入上屏区</h3>
+                                        <div class="word-sequence flex flex-wrap gap-2 min-h-[48px] p-2 bg-gray-50 border border-gray-100 rounded-lg items-center">
+                                            <span v-if="vueWordSequence.length === 0" class="placeholder text-gray-400 text-sm px-2">通过手语识别后，点头将词汇添加至此</span>
+                                            <span v-for="(word, idx) in vueWordSequence" :key="idx" class="word-tag bg-green-100 border border-green-200 text-green-800 px-3 py-1 rounded-full text-sm flex items-center">
                                                 {{ word }}
-                                                <button @click="agent.deleteWord(idx)" class="ml-2 text-red-500 hover:text-red-700">&times;</button>
+                                                <button @click="agent.deleteWord(idx)" class="ml-2 text-green-600 hover:text-red-500 font-bold">&times;</button>
                                             </span>
                                         </div>
                                     </div>
 
-                                    <div class="flex flex-wrap gap-2 justify-end">
-                                        <button @click="clearSequence" class="text-sm text-gray-600 px-3 py-1 rounded-lg border hover:bg-gray-50">清空表达</button>
-                                        <button @click="polishSequence" class="text-sm bg-indigo-50 text-indigo-600 px-3 py-1 rounded-lg hover:bg-indigo-100">✨ 润色分诊</button>
-                                        <button @click="quickAppointment" class="text-sm bg-blue-600 text-white px-3 py-1 rounded-lg hover:bg-blue-700">去预约挂号</button>
+                                    <div class="flex flex-wrap gap-2 justify-end shrink-0">
+                                        <button @click="clearSequence" class="text-sm text-gray-600 px-3 py-1.5 rounded-lg border hover:bg-gray-50">清空输入</button>
+                                        <button @click="startScanning" class="text-sm bg-indigo-50 text-indigo-600 px-3 py-1.5 rounded-lg hover:bg-indigo-100 font-medium">✨ 模拟手语整句发送</button>
                                     </div>
                                 </div>
 
-                                <!-- 人工帮助侧边栏（语音输入 + 聊天记录） -->
+                                <!-- 人工帮助侧边栏 -->
                                 <div class="bg-white rounded-2xl shadow-sm p-4 transition-all duration-300">
                                     <div class="flex justify-between items-center cursor-pointer" @click="showChat = !showChat">
                                         <h3 class="font-bold text-lg flex items-center gap-2">
-                                            <span>📞</span> 人工帮助
+                                            <span class="text-xl">📞</span> 呼叫人工导诊台
                                         </h3>
                                         <button class="text-blue-600 text-sm hover:underline">
                                             {{ showChat ? '收起 ▲' : '展开 ▼' }}
                                         </button>
                                     </div>
                                     <div v-show="showChat" class="mt-4 transition-all duration-300">
-                                        <!-- 聊天记录区域 -->
-                                        <div class="chat-messages max-h-64 overflow-y-auto mb-4 space-y-2">
+                                        <div class="chat-messages max-h-48 overflow-y-auto mb-4 space-y-2 border-t pt-2">
                                             <div v-for="msg in chatMessages" :key="msg.id" class="flex justify-end">
                                                 <div class="bg-blue-500 text-white rounded-lg px-3 py-2 max-w-xs break-words">
                                                     <div class="text-sm">{{ msg.text }}</div>
                                                     <div class="text-xs text-blue-100 mt-1 text-right">{{ msg.time }}</div>
                                                 </div>
                                             </div>
-                                            <div v-if="chatMessages.length === 0" class="text-center text-gray-400 text-sm py-2">
-                                                暂无消息，发送消息后显示在此处
+                                            <div v-if="chatMessages.length === 0" class="text-center text-gray-400 text-sm py-4">
+                                                人工座席在线，如 AI 无法解决您的问题，请在此沟通
                                             </div>
                                         </div>
 
-                                        <!-- 输入区域 -->
-                                        <input v-model="voiceText" type="text" placeholder="输入文字或使用语音..." class="w-full border rounded-lg p-2 mb-2">
-                                        <div v-if="recognizedText" class="mb-3 p-2 bg-yellow-50 border border-yellow-200 rounded-lg">
-                                            <div class="text-sm text-gray-600 mb-2">识别结果：</div>
-                                            <div class="flex items-center gap-2">
-                                                <span class="flex-1 text-gray-800">{{ recognizedText }}</span>
-                                                <button @click="confirmVoiceText" class="bg-green-500 text-white px-3 py-1 rounded text-sm">确认</button>
-                                                <button @click="cancelVoiceText" class="bg-gray-300 text-gray-700 px-3 py-1 rounded text-sm">取消</button>
-                                            </div>
-                                        </div>
-                                        <div class="flex items-center gap-2 mb-3">
-                                            <button @click="toggleVoiceRecording" 
-                                                    :class="isRecordingVoice ? 'bg-red-500 hover:bg-red-600' : 'bg-green-500 hover:bg-green-600'"
-                                                    class="text-white px-4 py-2 rounded-lg text-sm flex items-center gap-1 transition-colors">
-                                                <span v-if="!isRecordingVoice">🎤 开始语音</span>
-                                                <span v-else>⏹ 停止录音</span>
-                                            </button>
-                                            <span v-if="isRecordingVoice" class="text-sm text-red-500 animate-pulse">录音中...</span>
-                                        </div>
+                                        <input v-model="voiceText" type="text" placeholder="输入求助信息..." class="w-full border rounded-lg p-2 mb-2 text-sm outline-none focus:border-blue-400">
                                         <div class="flex justify-end">
-                                            <button @click="sendPatientMessage(voiceText)" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700">
+                                            <button @click="sendPatientMessage(voiceText)" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 text-sm">
                                                 发送消息
                                             </button>
                                         </div>

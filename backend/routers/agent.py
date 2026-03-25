@@ -14,7 +14,6 @@ from backend.utils.langchain_agent import hybrid_understand_message
 router = APIRouter(prefix="/api/agent/register", tags=["agent"])
 
 DURATION_OPTIONS = ["今天刚开始", "1-3天", "超过1周", "很久了"]
-SEVERITY_OPTIONS = ["轻微", "中度", "明显", "难以忍受"]
 
 
 # 保留极简的兜底时段识别
@@ -35,8 +34,7 @@ def _next_missing_field(symptom: dict) -> Optional[str]:
         return "body_part"
     if not symptom.get("duration"):
         return "duration"
-    if not symptom.get("severity"):
-        return "severity"
+    # 优化点：不再主动追问 severity（严重程度），减少用户交互疲劳
     return None
 
 
@@ -52,7 +50,8 @@ def _is_change_department_intent(text: str, intent: Optional[str] = None) -> boo
 
 
 def _soft_slots_complete(symptom: dict) -> bool:
-    return bool(symptom.get("duration")) and bool(symptom.get("severity"))
+    # 严重程度降级为“隐性槽位”，只要有 duration 就视为软槽位收集完毕
+    return bool(symptom.get("duration"))
 
 
 def _has_core_ready(session: dict) -> bool:
@@ -76,8 +75,8 @@ def _should_proceed_to_slots(session: dict, text: str) -> bool:
 
     policy = session.get("policy", {})
     soft_ask_count = int(policy.get("soft_ask_count", 0))
-    # 核心决策阈值：软槽位（时间、程度）最多只追问 1 次
-    if soft_ask_count >= 1:
+    # 🌟 修改点 1：核心决策阈值：软槽位（时间等）追问放宽到 2 次，避免过早结束流程
+    if soft_ask_count >= 2:
         return True
     if _is_urgent_registration_intent(text):
         return True
@@ -162,8 +161,8 @@ def registration_agent_chat(payload: schemas.RegistrationAgentChatRequest, db: S
         # 🌟 核心修改点：彻底无视大模型的 missing_fields，强制由本地代码决定下一个追问项
         missing = _next_missing_field(session["symptom_struct"])
 
-        # 只有追问“软槽位”时，才增加 soft_ask_count 次数
-        if missing in ["duration", "severity"]:
+        # 只有追问“软槽位”时，才增加 soft_ask_count 次数（severity已移除）
+        if missing in ["duration"]:
             session["policy"]["soft_ask_count"] = int(session["policy"].get("soft_ask_count", 0)) + 1
 
         if missing == "primary_symptom":
@@ -179,15 +178,16 @@ def registration_agent_chat(payload: schemas.RegistrationAgentChatRequest, db: S
             ps = session['symptom_struct'].get('primary_symptom') or '不适'
             # 避免出现 "胸部胸痛" 这种叠字，拼接得更自然一点
             symptom_name = ps if bp in ps else f"{bp}{ps}"
+
+            # 🌟 修改点 2：彰显 Agent 理解力，动态复述伴随症状并调整共情语气
+            acc_list = session['symptom_struct'].get('accompanying_symptoms') or []
+            acc_str = f"，且伴有「{'、'.join(acc_list)}」" if acc_list else ""
+            prefix = "明白，这确实需要引起重视。" if acc_list else "了解到"
+
             return helpers.make_agent_response(
-                f"了解到您有「{symptom_name}」的情况。为了精准分诊，请问持续多久了？",
+                f"{prefix}您有「{symptom_name}」{acc_str}的情况。为了帮医生准确评估病情，请问持续多久了？",
                 session, ["duration"], DURATION_OPTIONS, "collect_duration"
             )
-
-        if missing == "severity":
-            session["state"] = "COLLECT_INFO"
-            return helpers.make_agent_response("请问目前不适程度如何？", session, ["severity"], SEVERITY_OPTIONS,
-                                               "collect_severity")
 
         if missing == "body_part":
             session["state"] = "COLLECT_INFO"
