@@ -26,7 +26,7 @@ const app = createApp({
             '糖皮质激素': '一类抗炎药物，常用于过敏、哮喘等。',
             'MRI': '磁共振成像，无辐射检查。'
         };
-        const voiceInput = ref('');  // 医生语音消息（原有，保留）
+        const voiceInput = ref('');
 
         // ========== 新增：手语辅助窗口状态 ==========
         const isHandsignOpen = ref(false);
@@ -40,7 +40,6 @@ const app = createApp({
         let mediaRecorderDoc = null;
         let audioChunksDoc = [];
 
-        // ========== 手语 agent（用于医生端？实际上新窗口独立使用，但为了保持代码一致保留） ==========
         const agent = new SignLanguageAgent({
             apiUrl: 'http://localhost:5000',
             onResult: () => {},
@@ -117,7 +116,6 @@ const app = createApp({
             doctorVoiceText.value = '';
         };
 
-        // ========== 新增：患者手语消息显示 ==========
         const patientMessages = computed(() => {
             if (!selectedPatient.value) return [];
             return (selectedPatient.value.messages || [])
@@ -131,7 +129,6 @@ const app = createApp({
             return `${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`;
         };
 
-        // ========== 原有函数（医生登录、患者列表等）==========
         const goToRoleSelect = () => {
             window.location.href = 'index.html';
         };
@@ -150,7 +147,7 @@ const app = createApp({
                 view.value = 'doctor-view';
                 loadPatients();
                 if (patients.value.length > 0) {
-                    selectedPatientId.value = patients.value[0].id;
+                    selectedPatientId.value = String(patients.value[0].id);
                 } else {
                     selectedPatientId.value = '';
                 }
@@ -167,7 +164,6 @@ const app = createApp({
             doctorPwd.value = '';
             doctorDept.value = '';
             view.value = 'login';
-            // 关闭手语辅助窗口
             if (handsignWindow && !handsignWindow.closed) handsignWindow.close();
             if (windowCheckInterval) clearInterval(windowCheckInterval);
             isHandsignOpen.value = false;
@@ -175,10 +171,13 @@ const app = createApp({
 
         const loadPatients = () => {
             const allPatients = getPatients();
+            // 🌟 新增过滤条件：只保留没有被标记为 is_finished 的患者
+            const activePatients = allPatients.filter(p => !p.is_finished);
+
             if (doctorDept.value) {
-                patients.value = allPatients.filter(p => p.dept === doctorDept.value);
+                patients.value = activePatients.filter(p => p.dept === doctorDept.value);
             } else {
-                patients.value = allPatients;
+                patients.value = activePatients;
             }
         };
 
@@ -198,12 +197,21 @@ const app = createApp({
             if (handsignWindow && !handsignWindow.closed) handsignWindow.close();
         });
 
+        // 🌟 修复 Bug：强制转换为 String 比较，避免 Number 与 String 的类型隐式不一致导致无法切换
         const selectedPatient = computed(() => {
-            return patients.value.find(p => p.id === selectedPatientId.value) || null;
+            return patients.value.find(p => String(p.id) === String(selectedPatientId.value)) || null;
         });
 
         const selectPatient = (id) => {
-            selectedPatientId.value = id;
+            // 如果手语辅助窗口开着，切换患者时关闭它，避免混乱
+            if (isHandsignOpen.value && handsignWindow && !handsignWindow.closed) {
+                handsignWindow.close();
+                isHandsignOpen.value = false;
+            }
+            selectedPatientId.value = String(id);
+            // 重置添加处方状态
+            showAddPrescription.value = false;
+            newRx.value = { drug: '', dosage: '', usage: '' };
         };
 
         const saveMedicalHistory = () => {
@@ -211,6 +219,26 @@ const app = createApp({
                 selectedPatient.value.lastUpdated = new Date().toLocaleTimeString();
                 upsertPatient(selectedPatient.value);
                 alert('病历已保存');
+            }
+        };
+
+        // 🌟 新增：结束就诊功能
+        const finishConsultation = () => {
+            if (!selectedPatient.value) return;
+            if (!confirm(`确定要结束患者【${selectedPatient.value.name}】的就诊吗？结束后的患者将从待诊列表中移除。`)) return;
+
+            // 1. 标记患者就诊完成（写入 localStorage）
+            selectedPatient.value.is_finished = true;
+            upsertPatient(selectedPatient.value);
+
+            // 2. 重新加载患者列表（已自动过滤掉 is_finished = true 的患者）
+            loadPatients();
+
+            // 3. 自动叫号（选择列表中的下一个患者），如果列表为空则清空选中状态
+            if (patients.value.length > 0) {
+                selectPatient(patients.value[0].id);
+            } else {
+                selectedPatientId.value = '';
             }
         };
 
@@ -247,7 +275,6 @@ const app = createApp({
             voiceInput.value = '';
         };
 
-        // ========== 手语辅助窗口打开逻辑 ==========
         const openPatientAssist = () => {
             if (!selectedPatient.value) return alert('请先选择一位患者');
             if (handsignWindow && !handsignWindow.closed) {
@@ -274,7 +301,6 @@ const app = createApp({
             }
         };
 
-        // 为了兼容，保留一个空方法（原页面切换已废弃）
         const backToDoctor = () => {};
 
         return {
@@ -284,16 +310,13 @@ const app = createApp({
             selectedTerm, termExplanation,
             showAddPrescription, newRx,
             goToRoleSelect, doctorLogin, logout, selectPatient,
-            saveMedicalHistory, addPrescription, removePrescription,
+            saveMedicalHistory, finishConsultation, addPrescription, removePrescription,
             sendVoiceMessage, openPatientAssist, backToDoctor,
             queryTerm,
-            // 新增变量
             isHandsignOpen,
-            // 医生语音转文字
             doctorVoiceText, doctorRecognizedText, isRecordingVoiceForDoc,
             startDoctorVoiceRecording, stopDoctorVoiceRecording,
             confirmDoctorVoiceText, cancelDoctorVoiceText, sendDoctorVoiceMessage,
-            // 患者手语消息
             patientMessages, formatTime
         };
     },
@@ -335,120 +358,187 @@ const app = createApp({
                 <h3 class="font-bold border-b pb-4 mb-4">待诊患者 ({{ patients.length }}) <span class="text-sm font-normal text-gray-500 ml-2">{{ doctorDept }}</span></h3>
                 <div v-if="patients.length === 0" class="text-gray-400 text-center py-4">暂无本科室患者</div>
                 <div v-else class="space-y-3 max-h-[600px] overflow-y-auto">
-                    <div v-for="p in patients" :key="p.id" @click="selectPatient(p.id)" class="p-3 rounded-xl cursor-pointer transition-colors" :class="selectedPatientId === p.id ? 'bg-blue-50 border-l-4 border-blue-500' : 'bg-gray-50 hover:bg-gray-100'">
+                    <!-- 🌟 修复点击高亮匹配问题：将 p.id 强转为 String -->
+                    <div v-for="p in patients" :key="p.id" @click="selectPatient(p.id)" class="p-3 rounded-xl cursor-pointer transition-colors" :class="String(selectedPatientId) === String(p.id) ? 'bg-blue-50 border-l-4 border-blue-500' : 'bg-gray-50 hover:bg-gray-100'">
                         <div class="flex items-center justify-between">
-                            <span class="font-medium">{{ p.name }} <span v-if="p.isDeaf" class="text-xs bg-blue-200 text-blue-800 px-2 py-0.5 rounded-full ml-2">聋哑</span></span>
+                            <span class="font-medium">
+                                {{ p.name }} 
+                                <span v-if="p.isDeaf || p.is_deaf" class="text-xs bg-blue-200 text-blue-800 px-2 py-0.5 rounded-full ml-2">聋哑</span>
+                            </span>
                         </div>
-                        <div class="text-xs text-gray-500 mt-1 truncate">{{ p.symptoms || '无病历' }}</div>
+                        <div class="text-xs text-gray-500 mt-1 truncate">
+                            <span v-if="p.triage_struct" class="text-indigo-600 font-bold mr-1">[AI分诊]</span>
+                            {{ p.triage_struct?.primary_symptom || p.symptoms || '待接诊' }}
+                        </div>
                     </div>
                 </div>
             </div>
+            
             <div class="col-span-9 space-y-6" v-if="selectedPatient">
-                <div class="bg-white p-6 rounded-2xl shadow-sm border-t-4 border-blue-600">
+                <!-- 顶部：患者信息与大屏看板 -->
+                <div class="bg-white p-6 rounded-2xl shadow-sm border-t-4 border-blue-600 transition-all duration-300">
                     <div class="flex flex-wrap justify-between items-start gap-4 mb-4">
                         <div>
                             <h2 class="text-xl font-bold flex items-center gap-2">
                                 当前患者：{{ selectedPatient.name }}
                                 <span v-if="isHandsignOpen" class="bg-green-100 text-green-600 px-3 py-1 rounded text-sm">手语辅助已开启</span>
                             </h2>
-                            <p class="text-sm text-gray-500">ID: {{ selectedPatient.id }} | 科室: {{ selectedPatient.dept }}</p>
+                            <p class="text-sm text-gray-500 mt-1">ID: {{ selectedPatient.id }} | 挂号科室: {{ selectedPatient.dept }}</p>
                         </div>
-                        <button @click="openPatientAssist" class="flex items-center gap-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 px-4 py-2 rounded-xl font-medium transition">
-                            <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path d="M10 12a2 2 0 100-4 2 2 0 000 4z"></path><path fill-rule="evenodd" d="M.458 10C1.732 5.943 5.522 3 10 3s8.268 2.943 9.542 7c-1.274 4.057-5.064 7-9.542 7S1.732 14.057.458 10zM14 10a4 4 0 11-8 0 4 4 0 018 0z" clip-rule="evenodd"></path></svg>
-                            手语辅助
-                        </button>
+                        <!-- 🌟 新增：结束就诊按钮组合 -->
+                        <div class="flex items-center gap-3">
+                            <button @click="openPatientAssist" class="flex items-center gap-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 px-4 py-2 rounded-xl font-medium transition">
+                                <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path d="M10 12a2 2 0 100-4 2 2 0 000 4z"></path><path fill-rule="evenodd" d="M.458 10C1.732 5.943 5.522 3 10 3s8.268 2.943 9.542 7c-1.274 4.057-5.064 7-9.542 7S1.732 14.057.458 10zM14 10a4 4 0 11-8 0 4 4 0 018 0z" clip-rule="evenodd"></path></svg>
+                                打开诊间手语辅助
+                            </button>
+                            <button @click="finishConsultation" class="bg-green-600 hover:bg-green-700 text-white px-5 py-2 rounded-xl font-bold transition shadow-sm flex items-center gap-1">
+                                结束就诊 (下一位) ⏭
+                            </button>
+                        </div>
                     </div>
-                    <div class="grid grid-cols-3 gap-4 text-sm mb-2">
-                        <div class="bg-slate-50 p-3 rounded-lg"><span class="text-gray-400 block">主诉/症状：</span><span class="font-medium text-blue-700">{{ selectedPatient.symptoms || '未记录' }}</span></div>
-                        <div class="bg-slate-50 p-3 rounded-lg"><span class="text-gray-400 block">过敏史：</span><span class="font-medium text-red-600">{{ selectedPatient.allergy || '不详' }}</span></div>
-                        <div class="bg-slate-50 p-3 rounded-lg"><span class="text-gray-400 block">年龄/性别：</span><span class="font-medium">{{ selectedPatient.age ? selectedPatient.age + '岁' : '?' }} / {{ selectedPatient.genderText || '?' }}</span></div>
+
+                    <!-- 🌟 核心修改：极简与智能并存的自适应网格布局 -->
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm mb-2">
+                        
+                        <!-- AI 结构化主诉卡片 (仅聋哑人且有 AI 分诊数据时显示，横跨 2 列) -->
+                        <div v-if="(selectedPatient.isDeaf || selectedPatient.is_deaf) && selectedPatient.triage_struct" class="md:col-span-2 bg-indigo-50/40 p-5 rounded-2xl border border-indigo-100 shadow-sm transition-all duration-500">
+                            
+                            <div class="flex items-center justify-between mb-3">
+                                <span class="text-gray-500 font-medium">手语 AI 智能分诊摘要：</span>
+                                <span class="text-xs bg-indigo-100 text-indigo-700 px-2.5 py-1 rounded-md font-bold flex items-center gap-1">
+                                    🤖 提前采集
+                                </span>
+                            </div>
+
+                            <div class="space-y-3">
+                                <div class="flex items-center flex-wrap gap-x-4 gap-y-2 text-base">
+                                    <div class="flex items-center gap-2"><span class="text-gray-400 text-xs">核心</span><span class="font-bold text-red-600">{{ selectedPatient.triage_struct.primary_symptom || '不适' }}</span></div>
+                                    <span class="text-gray-300">|</span>
+                                    <div class="flex items-center gap-2"><span class="text-gray-400 text-xs">部位</span><span class="font-medium text-gray-800">{{ selectedPatient.triage_struct.body_part || '未定' }}</span></div>
+                                    <span class="text-gray-300">|</span>
+                                    <div class="flex items-center gap-2"><span class="text-gray-400 text-xs">病程</span><span class="font-medium text-gray-800">{{ selectedPatient.triage_struct.duration || '未定' }}</span></div>
+                                    
+                                    <template v-if="selectedPatient.triage_struct.severity">
+                                        <span class="text-gray-300">|</span>
+                                        <div class="flex items-center gap-2"><span class="text-gray-400 text-xs">程度</span><span class="font-medium text-gray-800">{{ selectedPatient.triage_struct.severity }}</span></div>
+                                    </template>
+                                </div>
+                                
+                                <div v-if="selectedPatient.triage_struct.accompanying_symptoms && selectedPatient.triage_struct.accompanying_symptoms.length > 0" class="flex items-center flex-wrap gap-2 pt-2 border-t border-indigo-100/50">
+                                    <span class="text-xs text-gray-500">伴随症状：</span>
+                                    <span v-for="sym in selectedPatient.triage_struct.accompanying_symptoms" :key="sym" class="bg-orange-100 text-orange-700 text-xs px-2 py-1 rounded shadow-sm">
+                                        {{ sym }}
+                                    </span>
+                                </div>
+
+                                <div v-if="selectedPatient.triage_struct.original_text" class="text-xs text-gray-500 mt-3 bg-white p-3 rounded-lg border border-indigo-50 leading-relaxed italic shadow-inner">
+                                    <span class="font-medium text-gray-400 not-italic mr-1">参考原话：</span>"{{ selectedPatient.triage_struct.original_text }}"
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 基础档案信息（对普通患者来说，这两块并排显示，干净利落） -->
+                        <div class="bg-slate-50 p-4 rounded-xl flex flex-col justify-center">
+                            <span class="text-gray-400 block mb-1">系统既往过敏史：</span>
+                            <span class="font-bold text-red-600 text-base">{{ selectedPatient.allergy || '无 / 未知' }}</span>
+                        </div>
+                        <div class="bg-slate-50 p-4 rounded-xl flex flex-col justify-center">
+                            <span class="text-gray-400 block mb-1">患者档案：</span>
+                            <span class="font-medium text-gray-800 text-base">{{ selectedPatient.age ? selectedPatient.age + '岁' : '年龄不详' }} / {{ selectedPatient.genderText || '性别不详' }}</span>
+                        </div>
                     </div>
                 </div>
+
                 <div class="bg-white p-6 rounded-2xl shadow-sm">
                     <div class="flex justify-between items-center mb-3">
-                        <h3 class="font-bold text-lg flex items-center gap-2"><span class="w-1.5 h-5 bg-blue-500 rounded-full"></span>病历记录</h3>
-                        <button @click="saveMedicalHistory" class="text-sm bg-green-50 text-green-600 px-3 py-1 rounded-full hover:bg-green-100">保存病历</button>
+                        <h3 class="font-bold text-lg flex items-center gap-2"><span class="w-1.5 h-5 bg-blue-500 rounded-full"></span>病历记录与医嘱下达</h3>
+                        <button @click="saveMedicalHistory" class="text-sm bg-green-50 text-green-600 px-4 py-1.5 rounded-full hover:bg-green-100 font-medium">保存当前病历</button>
                     </div>
-                    <textarea v-model="selectedPatient.medicalHistory" rows="3" class="w-full border border-gray-200 rounded-xl p-3 text-sm focus:ring-2 focus:ring-blue-200 outline-none" placeholder="输入诊断..."></textarea>
+                    <textarea v-model="selectedPatient.medicalHistory" rows="4" class="w-full border border-gray-200 rounded-xl p-3 text-sm focus:ring-2 focus:ring-blue-200 outline-none leading-relaxed" placeholder="请结合 AI 摘要与面诊情况输入最终诊断与处置方案..."></textarea>
                 </div>
+
                 <div class="bg-white p-6 rounded-2xl shadow-sm">
                     <div class="flex justify-between items-center mb-3">
                         <h3 class="font-bold text-lg flex items-center gap-2"><span class="w-1.5 h-5 bg-green-500 rounded-full"></span>处方管理</h3>
-                        <button @click="showAddPrescription = true" class="text-sm bg-blue-50 text-blue-600 px-3 py-1 rounded-full hover:bg-blue-100">+ 添加药品</button>
+                        <button @click="showAddPrescription = true" class="text-sm bg-blue-50 text-blue-600 px-3 py-1 rounded-full hover:bg-blue-100">+ 添加处方药品</button>
                     </div>
                     <div v-if="selectedPatient.prescriptions?.length" class="space-y-2 mb-4">
-                        <div v-for="(rx, index) in selectedPatient.prescriptions" :key="index" class="prescription-item p-3 rounded-lg flex justify-between items-center">
+                        <div v-for="(rx, index) in selectedPatient.prescriptions" :key="index" class="prescription-item bg-gray-50 border border-gray-100 p-3 rounded-lg flex justify-between items-center hover:shadow-sm transition">
                             <div>
-                                <span class="font-medium">{{ rx.drug }}</span>
-                                <span class="text-sm text-gray-600 ml-2">{{ rx.dosage }}</span>
-                                <span class="text-xs text-gray-400 block">{{ rx.usage }}</span>
+                                <span class="font-bold text-gray-800">{{ rx.drug }}</span>
+                                <span class="text-sm text-gray-600 ml-3 bg-white px-2 py-0.5 rounded border">{{ rx.dosage }}</span>
+                                <span class="text-xs text-gray-500 block mt-1">{{ rx.usage }}</span>
                             </div>
-                            <button @click="removePrescription(index)" class="text-red-400 hover:text-red-600 text-xs">删除</button>
+                            <button @click="removePrescription(index)" class="text-red-400 hover:text-red-600 text-xs px-2 py-1 bg-red-50 rounded">删除</button>
                         </div>
                     </div>
-                    <div v-else class="text-gray-400 text-sm py-2">暂无处方</div>
-                    <div v-if="showAddPrescription" class="mt-4 border-t pt-4">
+                    <div v-else class="text-gray-400 text-sm py-4 text-center border-2 border-dashed rounded-xl">暂无处方</div>
+                    
+                    <div v-if="showAddPrescription" class="mt-4 border-t pt-4 bg-gray-50 -mx-6 -mb-6 p-6 rounded-b-2xl">
                         <div class="grid grid-cols-2 gap-3">
-                            <input v-model="newRx.drug" placeholder="药品名" class="border rounded-lg p-2 text-sm">
-                            <input v-model="newRx.dosage" placeholder="剂量" class="border rounded-lg p-2 text-sm">
-                            <input v-model="newRx.usage" placeholder="用法" class="border rounded-lg p-2 text-sm col-span-2">
+                            <input v-model="newRx.drug" placeholder="药品名称 (如: 阿莫西林胶囊)" class="border rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-blue-200 outline-none">
+                            <input v-model="newRx.dosage" placeholder="单次剂量 (如: 0.5g)" class="border rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-blue-200 outline-none">
+                            <input v-model="newRx.usage" placeholder="用法频次 (如: 口服, 每日3次)" class="border rounded-lg p-2.5 text-sm col-span-2 focus:ring-2 focus:ring-blue-200 outline-none">
                         </div>
-                        <div class="flex justify-end gap-2 mt-3">
-                            <button @click="showAddPrescription = false" class="text-xs text-gray-500 px-3 py-1">取消</button>
-                            <button @click="addPrescription" class="text-xs bg-green-600 text-white px-4 py-1 rounded-full">保存</button>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- 患者手语输入区域，仅在手语辅助窗口打开时显示 -->
-                <div v-if="isHandsignOpen" class="bg-white p-6 rounded-2xl shadow-sm mt-4">
-                    <h3 class="font-bold text-lg flex items-center gap-2">
-                        <span class="w-1.5 h-5 bg-green-500 rounded-full"></span>患者手语输入
-                    </h3>
-                    <div class="space-y-2 max-h-60 overflow-y-auto">
-                        <div v-if="patientMessages.length === 0" class="text-gray-400 text-center py-4">
-                            暂无手语消息
-                        </div>
-                        <div v-for="msg in patientMessages" :key="msg.id" class="bg-green-50 p-3 rounded-lg">
-                            <div class="text-sm text-green-800">{{ msg.content }}</div>
-                            <div class="text-xs text-gray-400 mt-1">{{ formatTime(msg.created_at) }}</div>
+                        <div class="flex justify-end gap-3 mt-4">
+                            <button @click="showAddPrescription = false" class="text-sm text-gray-500 px-4 py-1.5 hover:bg-gray-200 rounded-lg">取消</button>
+                            <button @click="addPrescription" class="text-sm bg-green-600 text-white px-6 py-1.5 rounded-lg shadow-sm hover:bg-green-700">保存到处方单</button>
                         </div>
                     </div>
                 </div>
 
-                <!-- 医生语音转文字区域，仅在手语辅助窗口打开时显示 -->
-                <div v-if="isHandsignOpen" class="bg-white p-6 rounded-2xl shadow-sm mt-4">
-                    <div class="flex justify-between items-center mb-3">
-                        <h3 class="font-bold text-lg flex items-center gap-2"><span class="w-1.5 h-5 bg-purple-500 rounded-full"></span>医生语音转文字</h3>
-                    </div>
-                    <div>
-                        <input v-model="doctorVoiceText" type="text" placeholder="输入文字或使用语音..." class="w-full border rounded-lg p-2 mb-2">
-                        <div v-if="doctorRecognizedText" class="mb-3 p-2 bg-yellow-50 border border-yellow-200 rounded-lg">
-                            <div class="text-sm text-gray-600 mb-2">识别结果：</div>
-                            <div class="flex items-center gap-2">
-                                <span class="flex-1 text-gray-800">{{ doctorRecognizedText }}</span>
-                                <button @click="confirmDoctorVoiceText" class="bg-green-500 text-white px-3 py-1 rounded text-sm">确认</button>
-                                <button @click="cancelDoctorVoiceText" class="bg-gray-300 text-gray-700 px-3 py-1 rounded text-sm">取消</button>
+                <!-- 底部：手语辅助聊天室 (仅开启时展示) -->
+                <div v-if="isHandsignOpen" class="grid grid-cols-2 gap-6 mt-4 pb-10">
+                    <div class="bg-white p-6 rounded-2xl shadow-sm border border-indigo-50">
+                        <h3 class="font-bold text-lg flex items-center gap-2 mb-4">
+                            <span class="w-1.5 h-5 bg-indigo-500 rounded-full"></span>患者最新手语动态
+                        </h3>
+                        <div class="space-y-3 max-h-60 overflow-y-auto pr-2 scrollbar-thin">
+                            <div v-if="patientMessages.length === 0" class="text-gray-400 text-center py-8">
+                                患者正在病床前，请引导患者面对摄像头比划手语。
+                            </div>
+                            <div v-for="msg in patientMessages" :key="msg.id" class="bg-indigo-50/50 border border-indigo-100 p-3 rounded-xl">
+                                <div class="text-sm text-indigo-900 leading-relaxed">{{ msg.content }}</div>
+                                <div class="text-xs text-indigo-400 mt-2 text-right">{{ formatTime(msg.created_at) }}</div>
                             </div>
                         </div>
-                        <div class="flex items-center gap-2 mb-3">
-                            <button @click="isRecordingVoiceForDoc ? stopDoctorVoiceRecording() : startDoctorVoiceRecording()" 
-                                    :class="isRecordingVoiceForDoc ? 'bg-red-500 hover:bg-red-600' : 'bg-green-500 hover:bg-green-600'"
-                                    class="text-white px-4 py-2 rounded-lg text-sm flex items-center gap-1 transition-colors">
-                                <span v-if="!isRecordingVoiceForDoc">🎤 开始语音</span>
-                                <span v-else>⏹ 停止录音</span>
-                            </button>
-                            <span v-if="isRecordingVoiceForDoc" class="text-sm text-red-500 animate-pulse">录音中...</span>
+                    </div>
+
+                    <div class="bg-white p-6 rounded-2xl shadow-sm border border-purple-50 flex flex-col justify-between">
+                        <div>
+                            <div class="flex justify-between items-center mb-4">
+                                <h3 class="font-bold text-lg flex items-center gap-2"><span class="w-1.5 h-5 bg-purple-500 rounded-full"></span>向患者发送语音/文字</h3>
+                            </div>
+                            <div v-if="doctorRecognizedText" class="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-xl">
+                                <div class="text-xs text-yellow-600 mb-1 font-medium">识别结果确认：</div>
+                                <div class="flex items-center gap-3">
+                                    <span class="flex-1 text-gray-800 text-sm">{{ doctorRecognizedText }}</span>
+                                    <button @click="confirmDoctorVoiceText" class="bg-green-500 text-white px-3 py-1 rounded text-sm hover:bg-green-600 shadow-sm">✓</button>
+                                    <button @click="cancelDoctorVoiceText" class="bg-gray-300 text-gray-700 px-3 py-1 rounded text-sm hover:bg-gray-400">✗</button>
+                                </div>
+                            </div>
+                            <textarea v-model="doctorVoiceText" rows="3" placeholder="打字输入或点击下方使用麦克风..." class="w-full border border-gray-200 rounded-xl p-3 text-sm focus:ring-2 focus:ring-purple-200 outline-none mb-3 resize-none"></textarea>
                         </div>
-                        <div class="flex justify-end">
-                            <button @click="sendDoctorVoiceMessage" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700">
-                                发送给患者
+                        <div class="flex items-center justify-between">
+                            <button @click="isRecordingVoiceForDoc ? stopDoctorVoiceRecording() : startDoctorVoiceRecording()" 
+                                    :class="isRecordingVoiceForDoc ? 'bg-red-500 text-white shadow-inner' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'"
+                                    class="px-4 py-2 rounded-xl text-sm flex items-center gap-2 transition-all font-medium">
+                                <span v-if="!isRecordingVoiceForDoc">🎤 麦克风录入</span>
+                                <span v-else>⏹ 结束录音</span>
+                                <span v-if="isRecordingVoiceForDoc" class="w-2 h-2 rounded-full bg-white animate-ping ml-1"></span>
+                            </button>
+                            <button @click="sendDoctorVoiceMessage" class="bg-purple-600 text-white px-6 py-2 rounded-xl hover:bg-purple-700 shadow-sm font-medium transition-all">
+                                发送至患者屏幕
                             </button>
                         </div>
                     </div>
                 </div>
             </div>
-            <div v-else class="col-span-9 bg-white rounded-2xl shadow-sm p-12 text-center text-gray-400">请从左侧选择一个患者开始就诊</div>
+            
+            <div v-else class="col-span-9 bg-white rounded-2xl shadow-sm p-12 flex flex-col items-center justify-center text-gray-400 h-[600px]">
+                <svg class="w-16 h-16 mb-4 text-gray-200" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"></path></svg>
+                <p class="text-lg">今日待诊列表为空，或请从左侧选择一位患者开始就诊</p>
+            </div>
         </div>
     `
 });
