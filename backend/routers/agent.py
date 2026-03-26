@@ -9,7 +9,9 @@ from backend import crud, schemas
 from backend.config import settings
 from backend.database import get_db
 from backend.utils import helpers
-from backend.utils.langchain_agent import hybrid_understand_message
+from backend.utils.langchain_agent import unified_medical_agent  # 🌟 引入全局单例的统一 Agent
+from pydantic import BaseModel
+from typing import List
 
 router = APIRouter(prefix="/api/agent/register", tags=["agent"])
 
@@ -114,8 +116,8 @@ def registration_agent_chat(payload: schemas.RegistrationAgentChatRequest, db: S
         return helpers.make_agent_response("好的，请重新描述你的症状，我会重新为你推荐科室。", session, ["symptom"], [],
                                            "collect_symptom")
 
-    # 1. 核心意图与槽位解析
-    decision = hybrid_understand_message(text, session.get("slots", {}), session.get("symptom_struct", {}))
+    # 1. 🌟 调用同一个 Agent，执行【分诊阶段】任务
+    decision = unified_medical_agent.triage_stage_understand(text, session.get("slots", {}), session.get("symptom_struct", {}))
 
     # 2. 动态更新科室
     current_department = session["slots"].get("department")
@@ -264,3 +266,17 @@ def registration_agent_chat(payload: schemas.RegistrationAgentChatRequest, db: S
 
     session["state"] = "FAILED"
     return helpers.make_agent_response("抱歉，流程出现异常，请重新开始。", session, [], [], "restart")
+
+
+# ===========================================================================
+# 🌟 新增端点：供前端面诊阶段 (handsign_assist.js) 调用
+# ===========================================================================
+class PolishRequest(BaseModel):
+    words: List[str]
+    context: str
+
+@router.post("/consultation/polish")
+def polish_consultation_words(req: PolishRequest):
+    # 🌟 调用同一个 Agent，执行【面诊阶段】任务
+    polished_text = unified_medical_agent.consultation_stage_polish(req.words, req.context)
+    return {"polished_text": polished_text}
