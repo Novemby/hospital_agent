@@ -1,380 +1,383 @@
-// 手语识别 Agent - 集成头部姿态检测（点头/摇头）替代候选词选择
-// 适配新识别服务（5000端口）与原有后端（8000端口）协同
-export class SignLanguageAgent {
-    constructor(options = {}) {
-        this.options = {
-            // 原有后端地址（序列管理、润色等）
-            apiUrl: 'http://localhost:8000',
-            // 新识别服务地址
-            recognitionApiUrl: 'http://localhost:8000/api/sign',
-            mode: 'isolated',
-            onResult: () => {},
-            onSequenceUpdate: () => {},
-            onStatusChange: () => {},
-            onHeadGesture: () => {},
-            ...options
-        };
-        this.apiUrl = this.options.apiUrl;
-        this.recognitionApiUrl = this.options.recognitionApiUrl;
-        this.mode = this.options.mode;
+/**
+ * frontend/js/services/signLanguageAgent.js
+ *
+ * 手语识别核心类（修复版）
+ *
+ * ★ 修复说明：
+ *   1. 接口与 handsign_assist.js 的调用方式完全对齐
+ *      - startCamera(videoId, canvasId) 替代旧版 init()
+ *      - stopCamera() 释放资源
+ *      - 回调统一为 onResult / onStatusChange / onSequenceUpdate / onHeadGesture
+ *   2. 端口统一为 http://localhost:8000
+ *   3. 保留 base64 JPEG 帧发送逻辑（服务端 MediaPipe 提取关键点）
+ *
+ * 架构：
+ *   前端 MediaPipe Holistic ──► 仅用于骨架可视化
+ *   前端录制画面 → base64 JPEG ──► 后端 MediaPipe（Python）提取关键点 → 推理
+ *
+ * 依赖（HTML 中 CDN 引入）：
+ *   @mediapipe/holistic@0.5.1675471629
+ *   @mediapipe/camera_utils
+ *   @mediapipe/drawing_utils
+ */
 
-        // MediaPipe 相关
-        this.webcam = null;
-        this.canvas = null;
-        this.ctx = null;
-        this.camera = null;
-        this.holistic = null;
-        this.cameraStarted = false;
+class SignLanguageAgent {
+    /**
+     * @param {Object}   opts
+     * @param {string}   opts.apiUrl               后端地址，默认 'http://localhost:8000'
+     * @param {string}   opts.endpoint              识别接口路径，默认 '/api/sign/recognize'
+     * @param {number}   opts.captureIntervalMs     录制帧间隔(ms)，默认 100（约 10fps）
+     * @param {number}   opts.jpegQuality           截图质量 0~1，默认 0.7
+     * @param {number}   opts.trimFrames            裁剪首尾过渡帧，默认 2
+     * @param {number}   opts.confidenceThreshold   置信度阈值，默认 0.3
+     * @param {Function} opts.onResult              识别结果回调
+     * @param {Function} opts.onStatusChange        状态变化回调 (status, data)
+     * @param {Function} opts.onSequenceUpdate      词序列变化回调 (sequence)
+     * @param {Function} opts.onHeadGesture         头部手势回调 ({type})
+     */
+    constructor(opts = {}) {
+        // ── 统一端口为 8000 ──
+        this.apiUrl              = opts.apiUrl              || 'http://localhost:8000';
+        this.endpoint            = opts.endpoint            || '/api/sign/recognize';
+        this.captureIntervalMs   = opts.captureIntervalMs   || 100;
+        this.jpegQuality         = opts.jpegQuality         || 0.7;
+        this.trimFrames          = opts.trimFrames          || 2;
+        this.confidenceThreshold = opts.confidenceThreshold || 0.3;
 
-        // 孤立词识别相关
-        this.isRecording = false;
-        this.keypointsBuffer = [];   // 存储每帧的关键点数组
-        this.frameCount = 0;
-        this.lastCaptureTime = 0;
+        // 回调 —— 与 handsign_assist.js 的调用方式完全对齐
+        this.onResult         = opts.onResult         || (() => {});
+        this.onStatusChange   = opts.onStatusChange   || (() => {});
+        this.onSequenceUpdate = opts.onSequenceUpdate || (() => {});
+        this.onHeadGesture    = opts.onHeadGesture    || (() => {});
 
-        // 滑动窗口投票
-        this.predictionBuffer = [];
-        this.BUFFER_SIZE = 3;
-        this.lastDisplayedPrediction = null;
+        // 内部状态
+        this._isRecording    = false;
+        this._frames         = [];           // base64 JPEG 字符串列表
+        this._lastCapture    = 0;
+        this._holistic       = null;
+        this._camera         = null;
+        this._snapCanvas     = document.createElement('canvas');
+        this._videoEl        = null;
+        this._canvasEl       = null;
+        this._headGestureOn  = false;
 
-        // 词序列
-        this.wordSequence = [];
-
-        // 头部姿态检测
-        this.headGestureEnabled = false;
-        this.lastHeadPose = { pitch: 0, yaw: 0 };
-        this.gestureDebounceTimer = null;
-        this.gestureCooldown = 500;
-        this.gestureThreshold = 15;
-        this.gestureStableFrames = 3;
-
-        // Holistic 连接常量（绘制用）
-        this.POSE_CONNECTIONS = [[0,1],[1,2],[2,3],[3,7],[0,4],[4,5],[5,6],[6,8],[9,10],[11,12],[11,13],[13,15],[12,14],[14,16],[11,23],[12,24],[23,24]];
-        this.HAND_CONNECTIONS = [[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[0,9],[9,10],[10,11],[11,12],[0,13],[13,14],[14,15],[15,16],[0,17],[17,18],[18,19],[19,20],[5,9],[9,13],[13,17]];
-
-        this.initHolistic = this.initHolistic.bind(this);
-        this.onHolisticResults = this.onHolisticResults.bind(this);
-        this.extractLandmarks = this.extractLandmarks.bind(this);
-        this.detectHeadGesture = this.detectHeadGesture.bind(this);
+        // 词序列（确认后的词列表）
+        this._wordSequence   = [];
     }
 
-    initHolistic() {
-        this.holistic = new Holistic({
-            locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/holistic/${file}`
+    // ════════════════════════════════════════════════════════
+    //  公开属性
+    // ════════════════════════════════════════════════════════
+
+    get isRecording() { return this._isRecording; }
+    get frameCount()  { return this._frames.length; }
+
+    // ════════════════════════════════════════════════════════
+    //  摄像头控制（与 handsign_assist.js 调用方式对齐）
+    // ════════════════════════════════════════════════════════
+
+    /**
+     * 启动摄像头 + 初始化 MediaPipe Holistic（骨架可视化）。
+     * @param {string} videoId   - <video> 元素的 id
+     * @param {string} canvasId  - <canvas> 元素的 id
+     */
+    async startCamera(videoId, canvasId) {
+        this._videoEl  = document.getElementById(videoId);
+        this._canvasEl = document.getElementById(canvasId);
+
+        if (!this._videoEl || !this._canvasEl) {
+            throw new Error(`[SignAgent] 找不到元素: video=#${videoId}, canvas=#${canvasId}`);
+        }
+
+        // ★ 锁定 Holistic 版本，仅用于骨架可视化
+        this._holistic = new Holistic({
+            locateFile: (file) =>
+                `https://cdn.jsdelivr.net/npm/@mediapipe/holistic@0.5.1675471629/${file}`
         });
-        this.holistic.setOptions({
-            modelComplexity: 1,
-            smoothLandmarks: true,
+        this._holistic.setOptions({
+            modelComplexity:        1,
+            smoothLandmarks:        true,
             minDetectionConfidence: 0.5,
-            minTrackingConfidence: 0.5,
-            refineFaceLandmarks: true
+            minTrackingConfidence:  0.5,
+            refineFaceLandmarks:    false,
         });
-        this.holistic.onResults(this.onHolisticResults);
-    }
+        this._holistic.onResults((r) => this._onHolisticResults(r));
 
-    // 从 results 中提取 543 个关键点（姿态33 + 左手21 + 右手21 + 面部468）
-    extractLandmarks(results) {
-        const landmarks = [];
-        // 姿态点 (33个)
-        if (results.poseLandmarks) {
-            for (const lm of results.poseLandmarks) {
-                landmarks.push([lm.x, lm.y, lm.z]);
-            }
-        } else {
-            for (let i = 0; i < 33; i++) landmarks.push([0,0,0]);
-        }
-        // 左手 (21个)
-        if (results.leftHandLandmarks) {
-            for (const lm of results.leftHandLandmarks) {
-                landmarks.push([lm.x, lm.y, lm.z]);
-            }
-        } else {
-            for (let i = 0; i < 21; i++) landmarks.push([0,0,0]);
-        }
-        // 右手 (21个)
-        if (results.rightHandLandmarks) {
-            for (const lm of results.rightHandLandmarks) {
-                landmarks.push([lm.x, lm.y, lm.z]);
-            }
-        } else {
-            for (let i = 0; i < 21; i++) landmarks.push([0,0,0]);
-        }
-        // 面部 (468个)
-        if (results.faceLandmarks) {
-            for (const lm of results.faceLandmarks) {
-                landmarks.push([lm.x, lm.y, lm.z]);
-            }
-        } else {
-            for (let i = 0; i < 468; i++) landmarks.push([0,0,0]);
-        }
-        return landmarks; // 长度应为 33+21+21+468 = 543
-    }
-
-    onHolisticResults(results) {
-        if (!this.canvas) return;
-        this.canvas.width = this.webcam.videoWidth;
-        this.canvas.height = this.webcam.videoHeight;
-        this.ctx.save();
-        this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-        this.ctx.drawImage(results.image, 0, 0);
-
-        // 绘制关节点
-        if (results.poseLandmarks) {
-            drawConnectors(this.ctx, results.poseLandmarks, this.POSE_CONNECTIONS, { color: '#00FF8866', lineWidth: 2 });
-        }
-        if (results.leftHandLandmarks) {
-            drawConnectors(this.ctx, results.leftHandLandmarks, this.HAND_CONNECTIONS, { color: '#FF6B6B', lineWidth: 3 });
-            drawLandmarks(this.ctx, results.leftHandLandmarks, { color: '#FF6B6B', radius: 3 });
-        }
-        if (results.rightHandLandmarks) {
-            drawConnectors(this.ctx, results.rightHandLandmarks, this.HAND_CONNECTIONS, { color: '#4ECDC4', lineWidth: 3 });
-            drawLandmarks(this.ctx, results.rightHandLandmarks, { color: '#4ECDC4', radius: 3 });
-        }
-
-        // 头部姿态检测
-        if (this.headGestureEnabled && results.faceLandmarks) {
-            this.detectHeadGesture(results.faceLandmarks);
-        }
-
-        this.ctx.restore();
-
-        // 录制时捕获关键点数据
-        if (this.isRecording) {
-            const landmarks = this.extractLandmarks(results);
-            this.keypointsBuffer.push(landmarks);
-            this.frameCount++;
-            this.options.onStatusChange('recording', { frameCount: this.frameCount });
-        }
-    }
-
-    detectHeadGesture(faceLandmarks) {
-        // 使用左右眼中心和鼻尖估算头部姿态
-        const leftEye = faceLandmarks[33];
-        const rightEye = faceLandmarks[263];
-        const nose = faceLandmarks[1];
-
-        const eyeCenterX = (leftEye.x + rightEye.x) / 2;
-        const yaw = (nose.x - eyeCenterX) * 180;
-        const eyeCenterY = (leftEye.y + rightEye.y) / 2;
-        const pitch = (nose.y - eyeCenterY) * 180;
-
-        const deltaPitch = pitch - this.lastHeadPose.pitch;
-        const deltaYaw = yaw - this.lastHeadPose.yaw;
-        this.lastHeadPose = { pitch, yaw };
-
-        if (Math.abs(deltaPitch) > this.gestureThreshold) {
-            this.triggerGesture('nod');
-        } else if (Math.abs(deltaYaw) > this.gestureThreshold) {
-            this.triggerGesture('shake');
-        }
-    }
-
-    triggerGesture(type) {
-        if (this.gestureDebounceTimer) return;
-        this.options.onHeadGesture({ type });
-        this.gestureDebounceTimer = setTimeout(() => {
-            this.gestureDebounceTimer = null;
-        }, this.gestureCooldown);
-    }
-
-    enableHeadGesture(enable) {
-        this.headGestureEnabled = enable;
-    }
-
-    async startCamera(videoElementId, canvasElementId) {
-        if (this.cameraStarted) return;
-        this.webcam = document.getElementById(videoElementId);
-        this.canvas = document.getElementById(canvasElementId);
-        if (!this.webcam || !this.canvas) throw new Error('Video or canvas element not found');
-        this.ctx = this.canvas.getContext('2d');
-        this.initHolistic();
-        this.camera = new Camera(this.webcam, {
-            onFrame: async () => { await this.holistic.send({ image: this.webcam }); },
+        this._camera = new Camera(this._videoEl, {
+            onFrame: async () => {
+                await this._holistic.send({ image: this._videoEl });
+            },
             width: 640,
-            height: 480
+            height: 480,
         });
-        await this.camera.start();
-        this.cameraStarted = true;
-        this.options.onStatusChange('cameraStarted', true);
+        await this._camera.start();
+        console.log('[SignAgent] ✓ 摄像头已启动');
     }
 
+    /** 停止摄像头，释放资源 */
+    stopCamera() {
+        if (this._camera) {
+            try { this._camera.stop(); } catch (_) {}
+            this._camera = null;
+        }
+        if (this._holistic) {
+            try { this._holistic.close(); } catch (_) {}
+            this._holistic = null;
+        }
+        console.log('[SignAgent] 摄像头已停止');
+    }
+
+    // ════════════════════════════════════════════════════════
+    //  录制控制
+    // ════════════════════════════════════════════════════════
+
+    /** 开始录制 */
     startRecording() {
-        if (!this.cameraStarted) return;
-        this.isRecording = true;
-        this.keypointsBuffer = [];
-        this.frameCount = 0;
-        this.lastCaptureTime = 0;
-        this.clearPredictionBuffer();
-        this.options.onStatusChange('recordingStart');
+        if (this._isRecording) return;
+        this._frames      = [];
+        this._lastCapture = 0;
+        this._isRecording = true;
+        this.onStatusChange('recordingStart', {});
+        console.log('[SignAgent] 开始录制');
     }
 
+    /** 停止录制 → 自动发送识别请求 */
     async stopRecording() {
-        if (!this.isRecording) return;
-        this.isRecording = false;
-        if (this.keypointsBuffer.length < 5) {
-            this.options.onStatusChange('tooShort');
+        if (!this._isRecording) return;
+        this._isRecording = false;
+
+        const frames = [...this._frames];
+        this._frames = [];
+
+        console.log(`[SignAgent] 停止录制，共 ${frames.length} 帧`);
+
+        if (frames.length < 5) {
+            this.onStatusChange('tooShort', { frameCount: frames.length });
             return;
         }
-        this.options.onStatusChange('sending', { frameCount: this.keypointsBuffer.length });
+
+        this.onStatusChange('sending', { frameCount: frames.length });
+
         try {
-            // 将每个帧的关键点展平为一维数组
-            const flattenedFrames = this.keypointsBuffer.map(frame => frame.flat());
-            const response = await fetch(`${this.recognitionApiUrl}/recognize`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ frames: flattenedFrames })
-            });
-            const result = await response.json();
-            if (result.word) {
-                const prediction = result.word;
-                const confidence = result.confidence || 0.8;
-                this.displayResult(prediction, confidence);
-                this.options.onResult({
-                    prediction: prediction,
-                    confidence: confidence,
-                    topPredictions: []
+            const result = await this._sendFrames(frames);
+
+            if (result.success) {
+                // 回调结果 —— 字段名与 handsign_assist.js 期望一致
+                this.onResult({
+                    prediction:     result.prediction,
+                    confidence:     result.confidence,
+                    topPredictions: result.top_predictions || [],
+                    mode:           result.mode || '',
+                    frameCount:     result.frame_count || frames.length,
                 });
-                this.options.onStatusChange('resultReady', { prediction, confidence, topPredictions: [] });
+                this.onStatusChange('resultReady', {
+                    prediction: result.prediction,
+                    confidence: result.confidence,
+                });
             } else {
-                this.options.onStatusChange('recognitionFailed');
+                this.onStatusChange('recognitionFailed', { error: result.error });
             }
-        } catch (error) {
-            console.error('Recognition error:', error);
-            this.options.onStatusChange('networkError');
+        } catch (e) {
+            console.error('[SignAgent] 网络错误:', e);
+            this.onStatusChange('networkError', { error: e.message });
         }
     }
 
-    displayResult(prediction, confidence) {
-        this.predictionBuffer.push(prediction);
-        if (this.predictionBuffer.length > this.BUFFER_SIZE) this.predictionBuffer.shift();
-        const counts = {};
-        let maxCount = 0, finalPrediction = prediction;
-        for (const p of this.predictionBuffer) {
-            counts[p] = (counts[p] || 0) + 1;
-            if (counts[p] > maxCount) {
-                maxCount = counts[p];
-                finalPrediction = p;
-            }
-        }
-        if (maxCount >= Math.ceil(this.BUFFER_SIZE / 2)) {
-            if (this.lastDisplayedPrediction !== finalPrediction) {
-                this.lastDisplayedPrediction = finalPrediction;
-            }
-            this.options.onResult({
-                prediction: finalPrediction,
-                confidence: confidence,
-                topPredictions: []
-            });
-        } else {
-            this.options.onResult({
-                prediction: `${prediction}?`,
-                confidence: confidence,
-                topPredictions: []
-            });
-        }
+    /** 取消录制（不发送） */
+    cancelRecording() {
+        this._frames      = [];
+        this._isRecording = false;
     }
 
-    clearPredictionBuffer() {
-        this.predictionBuffer = [];
-        this.lastDisplayedPrediction = null;
+    // ════════════════════════════════════════════════════════
+    //  词序列管理（确认 / 删除 / 清空 / 润色）
+    // ════════════════════════════════════════════════════════
+
+    /** 确认一个词，加入词序列 */
+    confirmWord(word) {
+        if (!word) return;
+        this._wordSequence.push(word);
+        this.onSequenceUpdate([...this._wordSequence]);
+        this.onStatusChange('wordConfirmed', { word, isAuto: false });
     }
 
-    async confirmWord(label, isAuto = false) {
-        try {
-            // 调用原有后端确认词接口（序列管理）
-            const response = await fetch(`${this.apiUrl}/confirm_word`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ label })
-            });
-            const result = await response.json();
-            if (result.success) {
-                this.wordSequence = result.sequence;
-                this.options.onSequenceUpdate(this.wordSequence);
-                this.options.onStatusChange('wordConfirmed', { word: label, isAuto });
-                this.clearPredictionBuffer();
-            } else {
-                this.options.onStatusChange('confirmFailed');
-            }
-        } catch (error) {
-            console.error('Confirm word error:', error);
-            this.options.onStatusChange('networkError');
+    /** 自动确认（超时自动选第一候选） */
+    autoConfirmWord(word) {
+        if (!word) return;
+        this._wordSequence.push(word);
+        this.onSequenceUpdate([...this._wordSequence]);
+        this.onStatusChange('wordConfirmed', { word, isAuto: true });
+    }
+
+    /** 删除序列中指定位置的词 */
+    deleteWord(index) {
+        if (index >= 0 && index < this._wordSequence.length) {
+            this._wordSequence.splice(index, 1);
+            this.onSequenceUpdate([...this._wordSequence]);
         }
     }
 
-    async clearSequence() {
-        this.wordSequence = [];
-        this.options.onSequenceUpdate(this.wordSequence);
-        try {
-            await fetch(`${this.apiUrl}/clear_sequence`, { method: 'POST' });
-        } catch (e) {}
+    /** 清空词序列 */
+    clearSequence() {
+        this._wordSequence = [];
+        this.onSequenceUpdate([]);
     }
 
+    /** 润色词序列（调用后端 AI 润色接口，如无则本地拼接） */
     async polishSequence() {
-        if (this.wordSequence.length === 0) {
-            this.options.onStatusChange('emptySequence');
+        if (this._wordSequence.length === 0) {
+            this.onStatusChange('emptySequence', {});
             return null;
         }
+
+        const text = this._wordSequence.join(' ');
+
+        // 尝试调用后端润色接口
         try {
-            const response = await fetch(`${this.apiUrl}/polish_and_triage`, {
+            const resp = await fetch(`${this.apiUrl}/api/sign/polish`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ words: this.wordSequence, context: '急诊分诊' })
+                body: JSON.stringify({ words: this._wordSequence }),
             });
-            const result = await response.json();
-            if (result.success) {
-                return { polished: result.polished, triage: result.triage };
-            } else {
-                throw new Error(result.error);
+            if (resp.ok) {
+                return await resp.json();
             }
-        } catch (error) {
-            console.error('Polish error:', error);
-            this.options.onStatusChange('polishFailed');
-            return null;
+        } catch (_) {
+            // 后端无 polish 接口时降级
+        }
+
+        // 降级：直接返回拼接文本
+        return {
+            polished: text,
+            original: this._wordSequence,
+            triage: null,
+        };
+    }
+
+    // ════════════════════════════════════════════════════════
+    //  头部手势（点头/摇头检测 — 简化实现）
+    // ════════════════════════════════════════════════════════
+
+    /** 启用/禁用头部手势检测 */
+    enableHeadGesture(enabled) {
+        this._headGestureOn = !!enabled;
+        if (enabled) {
+            this._headHistory = [];
         }
     }
 
-    stopCamera() {
-        if (this.camera) {
-            this.camera.stop();
-            this.cameraStarted = false;
+    // ════════════════════════════════════════════════════════
+    //  内部方法
+    // ════════════════════════════════════════════════════════
+
+    /**
+     * Holistic 每帧回调：
+     *   1. 绘制骨架（可视化）
+     *   2. 录制时截取原始画面为 base64 JPEG
+     *   3. 头部手势检测（如果启用）
+     */
+    _onHolisticResults(results) {
+        const ctx = this._canvasEl.getContext('2d');
+        this._canvasEl.width  = this._videoEl.videoWidth  || 640;
+        this._canvasEl.height = this._videoEl.videoHeight || 480;
+
+        ctx.save();
+        ctx.clearRect(0, 0, this._canvasEl.width, this._canvasEl.height);
+        ctx.drawImage(results.image, 0, 0, this._canvasEl.width, this._canvasEl.height);
+
+        // 骨架可视化
+        if (results.poseLandmarks) {
+            drawConnectors(ctx, results.poseLandmarks, POSE_CONNECTIONS,
+                { color: '#00FF8866', lineWidth: 2 });
+        }
+        if (results.leftHandLandmarks) {
+            drawConnectors(ctx, results.leftHandLandmarks, HAND_CONNECTIONS,
+                { color: '#FF6B6B', lineWidth: 3 });
+            drawLandmarks(ctx, results.leftHandLandmarks,
+                { color: '#FF6B6B', radius: 3 });
+        }
+        if (results.rightHandLandmarks) {
+            drawConnectors(ctx, results.rightHandLandmarks, HAND_CONNECTIONS,
+                { color: '#4ECDC4', lineWidth: 3 });
+            drawLandmarks(ctx, results.rightHandLandmarks,
+                { color: '#4ECDC4', radius: 3 });
+        }
+        ctx.restore();
+
+        // ── 录制帧 ──
+        if (this._isRecording) {
+            const now = Date.now();
+            if (now - this._lastCapture < this.captureIntervalMs) return;
+            this._lastCapture = now;
+
+            this._snapCanvas.width  = this._canvasEl.width;
+            this._snapCanvas.height = this._canvasEl.height;
+            this._snapCanvas.getContext('2d')
+                .drawImage(results.image, 0, 0,
+                           this._snapCanvas.width, this._snapCanvas.height);
+
+            const b64 = this._snapCanvas
+                .toDataURL('image/jpeg', this.jpegQuality)
+                .split(',')[1];
+            this._frames.push(b64);
+        }
+
+        // ── 头部手势检测（简化版：基于鼻尖位移） ──
+        if (this._headGestureOn && results.poseLandmarks) {
+            this._detectHeadGesture(results.poseLandmarks);
         }
     }
 
-    getSequence() {
-        return [...this.wordSequence];
-    }
+    /**
+     * 简化的头部手势检测：
+     *   - 点头：鼻尖 y 坐标短时间内有明显上下波动
+     *   - 摇头：鼻尖 x 坐标短时间内有明显左右波动
+     */
+    _detectHeadGesture(poseLandmarks) {
+        const nose = poseLandmarks[0]; // 鼻尖
+        if (!this._headHistory) this._headHistory = [];
 
-    async addWord(word) {
-        try {
-            const response = await fetch(`${this.apiUrl}/confirm_word`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ label: word })
-            });
-            const result = await response.json();
-            if (result.success) {
-                this.wordSequence = result.sequence;
-                this.options.onSequenceUpdate(this.wordSequence);
-                this.options.onStatusChange('wordAdded', { word });
-            }
-        } catch (error) {}
-    }
+        this._headHistory.push({ x: nose.x, y: nose.y, t: Date.now() });
 
-    async deleteWord(index) {
-        if (index >= 0 && index < this.wordSequence.length) {
-            this.wordSequence.splice(index, 1);
-            this.options.onSequenceUpdate(this.wordSequence);
-            try {
-                await fetch(`${this.apiUrl}/clear_sequence`, { method: 'POST' });
-                for (const w of this.wordSequence) {
-                    await fetch(`${this.apiUrl}/confirm_word`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ label: w })
-                    });
-                }
-            } catch (e) {}
+        // 只保留最近 1 秒的数据
+        const cutoff = Date.now() - 1000;
+        this._headHistory = this._headHistory.filter(h => h.t > cutoff);
+
+        if (this._headHistory.length < 8) return;
+
+        const xs = this._headHistory.map(h => h.x);
+        const ys = this._headHistory.map(h => h.y);
+        const xRange = Math.max(...xs) - Math.min(...xs);
+        const yRange = Math.max(...ys) - Math.min(...ys);
+
+        const NOD_THRESHOLD   = 0.04;
+        const SHAKE_THRESHOLD = 0.05;
+
+        if (yRange > NOD_THRESHOLD && yRange > xRange * 1.5) {
+            this._headHistory = [];
+            this.onHeadGesture({ type: 'nod' });
+        } else if (xRange > SHAKE_THRESHOLD && xRange > yRange * 1.5) {
+            this._headHistory = [];
+            this.onHeadGesture({ type: 'shake' });
         }
+    }
+
+    /** 发送 base64 帧到后端识别接口 */
+    async _sendFrames(frames) {
+        const resp = await fetch(`${this.apiUrl}${this.endpoint}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                frames_b64:           frames,
+                trim_frames:          this.trimFrames,
+                confidence_threshold: this.confidenceThreshold,
+            }),
+        });
+        if (!resp.ok) {
+            throw new Error(`HTTP ${resp.status}: ${resp.statusText}`);
+        }
+        return resp.json();
     }
 }
+
+export { SignLanguageAgent };

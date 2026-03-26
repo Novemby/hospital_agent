@@ -84,47 +84,54 @@ python -m http.server 8001
 请确认后端连接的数据库与测试数据一致，并检查 `sys_doctor` 表中的 `work_no` 与 `password` 是否匹配输入。
 
 ## 项目结构
-hospital_agent/                                # 项目根目录
-├── design.md                                  # 项目设计文档
-├── backend/                                   # 核心后端服务（FastAPI）
-│   ├── main.py                                # FastAPI 应用入口，挂载路由、CORS
-│   ├── config.py                              # 后端配置（数据库、百度API密钥等）
-│   ├── database.py                            # 数据库连接与会话管理
-│   ├── models.py                              # SQLAlchemy 模型
-│   ├── schemas.py                             # Pydantic 模型（请求/响应结构）
-│   ├── crud.py                                # 数据库操作函数
-│   ├── dependencies.py                        # 依赖注入（如获取当前用户）
-│   ├── routers/                               # API 路由模块
-│   │   ├── patients.py                        # 患者相关接口（登录、列表、详情）
-│   │   ├── doctors.py                         # 医生登录接口
-│   │   ├── registrations.py                   # 挂号相关（科室、号源、提交）
-│   │   ├── agent.py                           # 挂号智能体对话接口（状态机）
-│   │   └── speech.py                          # 语音转文字接口（调用百度API）
-│   └── utils/                                 # 工具函数
-│       ├── audio_utils.py                     # 音频格式转换
-│       └── baidu_tts.py                       # 百度语音 API 封装
-├── db/                                        # 数据库初始化脚本
-│   └── init.sql                               # 建表语句（患者、医生、挂号、病历等）
-├── robust_multistream_checkpoints/            # 手语模型存放目录
-│   ├── label_mapping.json                     # 手语标签映射（如 {"头痛":0, "发烧":1,...}）
-│   └── best_robust_multistream_graformer.pth  # 训练好的模型权重
-├── hybrid_fpn_vit_distill_train.py            # 模型定义及推理文件
-└── frontend/                                  # 前端静态资源（原项目）
-    ├── index.html                             # 场景选择入口
-    ├── reg.html                               # 挂号场景页面
-    ├── scene2.html                            # 医生诊间工作台页面
-    ├── scene3.html                            # 我的场景页面
-    ├── handsign_assist.html                   # 手语辅助窗口（独立页面，与医生端联动）
-    ├── css/
-    │   ├── global.css                         # 全局样式
-    │   ├── scene1.css, scene2.css, scene3.css # 各场景专属样式
-    │   └── components/                        # 预留组件样式
-    ├── js/
-    │   ├── scene1.js, scene2.js, scene3.js    # 各页面逻辑
-    │   ├── handsign_assist.js                 # 手语辅助窗口逻辑（调用手语识别服务）
-    │   ├── services/
-    │   │   ├── authService.js                 # 认证服务（token 管理）
-    │   │   ├── signLanguageAgent.js           # 手语识别核心类（封装MediaPipe、调用识别接口）
-    │   │   └── patientService.js              # 患者数据服务（localStorage + 后端同步）
-    │   └── utils/                             # 工具函数（预留）
-    └── assets/                                # 图片等静态资源
+hospital_agent/                                 # 项目根目录
+├── design.md                                   # 项目设计文档
+├── robust_multistream_checkpoints/             # 手语模型存放目录
+│   ├── label_mapping.json                      # 标签映射（66个医疗词汇）
+│   └── best_robust_multistream_graformer.pth   # 模型权重
+├── hybrid_fpn_vit_distill_train.py             # 模型定义及训练脚本（完整）
+├── backend/                                    # 后端服务
+│   ├── main.py                                 # FastAPI 入口，注册路由
+│   ├── config.py                               # 后端配置（百度API密钥、科室列表）
+│   ├── database.py                             # 数据库连接与会话管理
+│   ├── models.py                               # SQLAlchemy 模型（患者、医生、挂号等）
+│   ├── schemas.py                              # Pydantic 模型（请求/响应结构）
+│   ├── crud.py                                 # 数据库操作函数
+│   ├── dependencies.py                         # 依赖注入（如获取当前用户）
+│   ├── routers/                                # API 路由模块
+│   │   ├── patients.py                         # 患者登录、列表、详情
+│   │   ├── doctors.py                          # 医生登录
+│   │   ├── registrations.py                    # 挂号相关（科室、号源、提交）
+│   │   ├── agent.py                            # 挂号智能体对话接口（状态机）
+│   │   ├── speech.py                           # 语音转文字接口（调用百度API）
+│   │   └── sign_language.py                    # 【新增】手语识别接口
+│   ├── services/                               # 【新增】业务服务
+│   │   └── sign_model.py                       # 手语模型加载、预处理、推理封装
+│   └── utils/                                  # 工具函数
+│       ├── helpers.py
+│       ├── init.py
+│       ├── langchain_agent.py
+│       ├── audio_utils.py                      # 音频格式转换
+│       └── baidu_tts.py                        # 百度语音 API 封装
+├── db/                                         # 数据库初始化脚本
+│   └── init.sql                                # 建表语句 + 测试数据
+├── frontend/                                   # 前端静态资源
+│   ├── index.html                              # 场景选择入口
+│   ├── reg.html                                # 挂号场景页面
+│   ├── scene2.html                             # 医生诊间工作台页面
+│   ├── scene3.html                             # 我的场景页面
+│   ├── handsign_assist.html                    # 手语辅助窗口（独立页面，与医生端联动）
+│   ├── css/                                    # 样式文件
+│   │   ├── global.css
+│   │   ├── scene1.css, scene2.css, scene3.css
+│   │   └── components/
+│   ├── js/
+│   │   ├── scene1.js, scene2.js, scene3.js
+│   │   ├── handsign_assist.js                  # 手语窗口主逻辑（Vue组件）
+│   │   ├── services/
+│   │   │   ├── authService.js                  # 认证服务（token 管理）
+│   │   │   ├── signLanguageAgent.js            # 手语识别核心类（MediaPipe、调用识别接口）
+│   │   │   └── patientService.js               # 患者数据服务（localStorage + 后端同步）
+│   │   └── utils/
+│   └── assets/                                 # 图片等静态资源
+└── requirements.txt                            # Python 依赖
