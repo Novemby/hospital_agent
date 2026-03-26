@@ -4,9 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>温暖急诊 · 手语翻译官</title>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/holistic/holistic.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils@0.3/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/holistic@0.5/holistic.js" crossorigin="anonymous"></script>
     <style>
         /* ============================================
            温暖急诊 · 手语翻译官 - 温暖舒适风格
@@ -1249,7 +1249,7 @@
 
         // ==================== 摄像头初始化 ====================
         function initHolistic() {
-            holistic = new Holistic({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/holistic/${file}` });
+            holistic = new Holistic({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/holistic@0.5/${file}` });
             holistic.setOptions({ modelComplexity: isolatedSettings.modelComplexity, smoothLandmarks: isolatedSettings.smoothLandmarks, minDetectionConfidence: isolatedSettings.minDetectionConfidence, minTrackingConfidence: isolatedSettings.minTrackingConfidence, refineFaceLandmarks: false });
             holistic.onResults(onHolisticResults);
         }

@@ -1,0 +1,7 @@
+.env.local
+.conda-env/
+.pip-tmp/
+__pycache__/
+*.pyc
+*.log
+start-test.txt
