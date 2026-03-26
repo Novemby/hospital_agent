@@ -27,12 +27,13 @@ class RegistrationNLU(BaseModel):
 
 
 class SymptomStruct(BaseModel):
-    primary_symptom: Optional[str] = Field(default=None, description="核心症状，如'疼痛', '发热', '胸闷'")
+    # 🌟 修复点 1：加重 Prompt 语气，严禁大模型留空主要症状
+    primary_symptom: Optional[str] = Field(default=None, description="最主要的不适感受（如'头晕','头痛','发热','疼痛'等）。只要患者表达了不适，此项绝不能为null！")
     body_part: Optional[str] = Field(default=None, description="具体身体部位及方位，如'左肩', '右上腹'")
     duration: Optional[str] = Field(default=None, description="持续时间，如'1天内', '1周', '几个月'")
     severity: Optional[str] = Field(default=None, description="严重程度描述，如'轻微', '剧烈'")
     accompanying_symptoms: List[str] = Field(default_factory=list,
-                                             description="伴随的其他症状列表，如['恶心', '活动受限']")
+                                             description="伴随的其他症状列表")
     original_text: Optional[str] = Field(default=None, description="将用户本次和历史输入的关于症状的原话完整拼接保留")
 
 
@@ -122,7 +123,7 @@ def hybrid_understand_message(
             "用户最新输入: {text}\n"
             "【核心任务】\n"
             "1. 意图与科室：推断用户的 intent。如果用户只描述了症状，必须利用医学常识推荐最合适的 recommended_department（必须在白名单内）。\n"
-            "2. 症状提取 (symptom_struct)：这是重中之重！结合已知症状结构和用户最新输入，精准提取并更新 symptom_struct 中的所有字段。必须保留原话(original_text)。\n"
+            "2. 症状提取 (symptom_struct)：这是重中之重！结合已知症状结构和用户最新输入，精准提取并更新 symptom_struct 中的所有字段。如果用户表达了身体不适，primary_symptom 绝对不能为null！必须保留原话(original_text)。\n"
             "3. 策略判断：判断当前缺失哪些关键信息，并决定下一步 strategy。\n"
             "【严禁事项】\n"
             "绝对不允许凭空捏造用户没有提到的症状或时间！不知道的字段留空 (null)。\n"

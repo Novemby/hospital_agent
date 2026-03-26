@@ -27,14 +27,13 @@ def _detect_period(text: str) -> Optional[str]:
 
 
 def _next_missing_field(symptom: dict) -> Optional[str]:
-    # 🌟 核心修改：强制本地按顺序校验缺失槽位
+    # 强制本地按顺序校验缺失槽位
     if not symptom.get("primary_symptom"):
         return "primary_symptom"
     if symptom.get("primary_symptom") == "疼痛" and not symptom.get("body_part"):
         return "body_part"
     if not symptom.get("duration"):
         return "duration"
-    # 优化点：不再主动追问 severity（严重程度），减少用户交互疲劳
     return None
 
 
@@ -50,7 +49,6 @@ def _is_change_department_intent(text: str, intent: Optional[str] = None) -> boo
 
 
 def _soft_slots_complete(symptom: dict) -> bool:
-    # 严重程度降级为“隐性槽位”，只要有 duration 就视为软槽位收集完毕
     return bool(symptom.get("duration"))
 
 
@@ -63,10 +61,8 @@ def _should_proceed_to_slots(session: dict, text: str) -> bool:
         return False
 
     symptom = session.get("symptom_struct", {})
-    # 🌟 核心加固：如果连核心症状都没有，绝不放行去查号源
     if not symptom.get("primary_symptom"):
         return False
-    # 如果是疼痛但没有说具体部位，也不放行
     if symptom.get("primary_symptom") == "疼痛" and not symptom.get("body_part"):
         return False
 
@@ -75,7 +71,6 @@ def _should_proceed_to_slots(session: dict, text: str) -> bool:
 
     policy = session.get("policy", {})
     soft_ask_count = int(policy.get("soft_ask_count", 0))
-    # 🌟 修改点 1：核心决策阈值：软槽位（时间等）追问放宽到 2 次，避免过早结束流程
     if soft_ask_count >= 2:
         return True
     if _is_urgent_registration_intent(text):
@@ -119,10 +114,10 @@ def registration_agent_chat(payload: schemas.RegistrationAgentChatRequest, db: S
         return helpers.make_agent_response("好的，请重新描述你的症状，我会重新为你推荐科室。", session, ["symptom"], [],
                                            "collect_symptom")
 
-    # 1. 核心意图与槽位解析（全权交由大模型）
+    # 1. 核心意图与槽位解析
     decision = hybrid_understand_message(text, session.get("slots", {}), session.get("symptom_struct", {}))
 
-    # 2. 动态更新科室（延迟决策）
+    # 2. 动态更新科室
     current_department = session["slots"].get("department")
     change_department = _is_change_department_intent(text, decision.get("intent"))
 
@@ -140,28 +135,48 @@ def registration_agent_chat(payload: schemas.RegistrationAgentChatRequest, db: S
     if period:
         session["slots"]["period"] = period
 
-    # 3. 极简合并大模型提取的结构化症状
+    # ==============================================================
+    # 🌟 核心修复 2：智能防覆盖机制，杜绝大模型返回的空值抹掉现有记录
+    # ==============================================================
     llm_symptom = decision.get("symptom_struct", {})
-    if llm_symptom and any(llm_symptom.values()):
-        session["symptom_struct"] = llm_symptom
+    if llm_symptom and isinstance(llm_symptom, dict):
+        for k, v in llm_symptom.items():
+            if v:  # 只有 LLM 真的提取到了内容才更新，拒绝 null 覆盖
+                if k == "accompanying_symptoms" and isinstance(v, list):
+                    existing = session["symptom_struct"].get(k, [])
+                    session["symptom_struct"][k] = list(set(existing + v))
+                else:
+                    session["symptom_struct"][k] = v
 
+    # 确保原话永远在追加
     if text and text not in str(session["symptom_struct"].get("original_text", "")):
         session["symptom_struct"]["original_text"] = (
                 str(session["symptom_struct"].get("original_text", "")) + " " + text).strip()
 
+    # ==============================================================
+    # 🌟 核心修复 3：强行提权机制！打断一切可能的死循环！
+    # ==============================================================
+    struct = session["symptom_struct"]
+    if not struct.get("primary_symptom"):
+        # 如果大模型死板地把“头晕”放在了伴随症状里，强行把它提出来当作核心症状！
+        if struct.get("accompanying_symptoms"):
+            struct["primary_symptom"] = struct["accompanying_symptoms"].pop(0)
+        # 如果大模型只给了一个部位（比如只提了头部），强行组装一个保底词
+        elif struct.get("body_part"):
+            struct["primary_symptom"] = "不适"
+
+    # 落库前同步状态
     session["slots"]["triage_symptoms"] = json.dumps(session["symptom_struct"], ensure_ascii=False)
 
     lower_text = text.lower()
     is_confirm = bool(decision.get("confirm")) or ("确认" in text or lower_text in ["ok", "yes", "y"])
 
-    # 4. 判断流程走向：拦截追问 vs 直接查号源
+    # 4. 判断流程走向
     allow_query_slots = _should_proceed_to_slots(session, text)
 
     if not allow_query_slots and session["state"] not in ["CONFIRM", "SUBMIT", "SUCCESS"]:
-        # 🌟 核心修改点：彻底无视大模型的 missing_fields，强制由本地代码决定下一个追问项
         missing = _next_missing_field(session["symptom_struct"])
 
-        # 只有追问“软槽位”时，才增加 soft_ask_count 次数（severity已移除）
         if missing in ["duration"]:
             session["policy"]["soft_ask_count"] = int(session["policy"].get("soft_ask_count", 0)) + 1
 
@@ -176,10 +191,8 @@ def registration_agent_chat(payload: schemas.RegistrationAgentChatRequest, db: S
             session["state"] = "COLLECT_INFO"
             bp = session['symptom_struct'].get('body_part') or ''
             ps = session['symptom_struct'].get('primary_symptom') or '不适'
-            # 避免出现 "胸部胸痛" 这种叠字，拼接得更自然一点
             symptom_name = ps if bp in ps else f"{bp}{ps}"
 
-            # 🌟 修改点 2：彰显 Agent 理解力，动态复述伴随症状并调整共情语气
             acc_list = session['symptom_struct'].get('accompanying_symptoms') or []
             acc_str = f"，且伴有「{'、'.join(acc_list)}」" if acc_list else ""
             prefix = "明白，这确实需要引起重视。" if acc_list else "了解到"
@@ -215,7 +228,6 @@ def registration_agent_chat(payload: schemas.RegistrationAgentChatRequest, db: S
                 session, ["date_or_department"], ["今天", "明天"] + settings.DEPARTMENTS, "change_date_or_department"
             )
 
-        # 静默分配时段
         preferred = session["slots"].get("period") or ("上午" if datetime.now().hour < 12 else "下午")
         matched = next((s for s in available if s.get("period") == preferred), None) or available[0]
 
