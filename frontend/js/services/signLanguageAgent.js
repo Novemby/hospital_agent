@@ -1,5 +1,5 @@
-// 手语识别 Agent - 集成头部姿态检测（点头/摇头）替代候选词选择
-// 适配新识别服务（5000端口）与原有后端（8000端口）协同
+// 手语识别 Agent - 自动化版本：识别结果直接回调，无需点头确认
+// 保留头部姿态检测（可选），但不再用于词汇确认
 const MEDIAPIPE_VERSIONS = {
     cameraUtils: '0.3',
     drawingUtils: '0.3',
@@ -12,11 +12,15 @@ const HOLISTIC_BASE_URL = `https://cdn.jsdelivr.net/npm/@mediapipe/holistic@${ME
 export class SignLanguageAgent {
     constructor(options = {}) {
         this.options = {
-            // 原有后端地址（序列管理、润色等）
+            // 原有后端地址（序列管理、润色等） - 自动化模式下可能不再需要
             apiUrl: 'http://localhost:8000',
             // 新识别服务地址
             recognitionApiUrl: 'http://localhost:8000/api/sign',
             mode: 'isolated',
+            // 识别结果回调（自动化发送）
+            onWordRecognized: () => {},   // 新增：直接返回识别到的词汇
+            onSentenceComplete: () => {},  // 新增：句子完成回调
+            // 保留旧回调兼容
             onResult: () => {},
             onSequenceUpdate: () => {},
             onStatusChange: () => {},
@@ -41,15 +45,34 @@ export class SignLanguageAgent {
         this.frameCount = 0;
         this.lastCaptureTime = 0;
 
-        // 滑动窗口投票
+        // 滑动窗口参数
+        this.WINDOW_SIZE = 45;         // 每个窗口的帧数 (~1.5s at 30fps)
+        this.WINDOW_STRIDE = 15;       // 窗口滑动步长 (~0.5s)
+        this.MAX_WINDOWS = 5;          // 最大窗口数量，限制API调用次数
+
+        // 滑动窗口投票（连续识别模式下禁用，直接显示结果）
         this.predictionBuffer = [];
         this.BUFFER_SIZE = 3;
         this.lastDisplayedPrediction = null;
+        this.lastRecognizedWords = [];  // 记录最近识别的词，防止短时间内重复
 
-        // 词序列
+        // 连续识别模式
+        this.continuousMode = false;
+        this.noHandFrames = 0;
+        this.NO_HAND_THRESHOLD = 15;   // ~0.5s，手部消失多少帧后触发识别
+        this.MIN_SIGN_FRAMES = 10;     // 有效手势最少帧数
+        this.MAX_SIGN_FRAMES = 150;    // 最大帧数（~5s），防止无限录制
+
+        // 句子级别的端点检测
+        this.sentenceWords = [];       // 累积的词汇
+        this.sentenceTimer = null;     // 句子超时计时器
+        this.SENTENCE_TIMEOUT = 2000;  // 2秒无新词汇则认为句子结束（缩短以便快速发送）
+        this.WORD_DEDUPE_WINDOW = 1500; // 1.5秒内相同词汇去重
+
+        // 词序列（可选，自动化模式下可能不再使用）
         this.wordSequence = [];
 
-        // 头部姿态检测
+        // 头部姿态检测（保留但不再用于确认词汇，可单独用于其他交互）
         this.headGestureEnabled = false;
         this.lastHeadPose = { pitch: 0, yaw: 0 };
         this.gestureDebounceTimer = null;
@@ -133,7 +156,7 @@ export class SignLanguageAgent {
             drawLandmarks(this.ctx, results.rightHandLandmarks, { color: '#4ECDC4', radius: 3 });
         }
 
-        // 头部姿态检测
+        // 头部姿态检测（可选，但不再用于确认词汇）
         if (this.headGestureEnabled && results.faceLandmarks) {
             this.detectHeadGesture(results.faceLandmarks);
         }
@@ -146,6 +169,35 @@ export class SignLanguageAgent {
             this.keypointsBuffer.push(landmarks);
             this.frameCount++;
             this.options.onStatusChange('recording', { frameCount: this.frameCount });
+        }
+
+        // 连续识别逻辑
+        if (this.continuousMode) {
+            const handsPresent = !!(results.leftHandLandmarks || results.rightHandLandmarks);
+            if (handsPresent) {
+                this.noHandFrames = 0;
+                if (!this.isRecording) {
+                    this.startRecording();
+                }
+            } else if (this.isRecording) {
+                this.noHandFrames++;
+                if (this.noHandFrames >= this.NO_HAND_THRESHOLD) {
+                    if (this.keypointsBuffer.length >= this.MIN_SIGN_FRAMES) {
+                        this.stopRecording();
+                    } else {
+                        // 帧数不足，静默丢弃
+                        this.isRecording = false;
+                        this.keypointsBuffer = [];
+                        this.frameCount = 0;
+                        this.noHandFrames = 0;
+                        this.options.onStatusChange('continuousReady');
+                    }
+                }
+            }
+            // 防止录制超时
+            if (this.isRecording && this.keypointsBuffer.length >= this.MAX_SIGN_FRAMES) {
+                this.stopRecording();
+            }
         }
     }
 
@@ -210,38 +262,74 @@ export class SignLanguageAgent {
         this.options.onStatusChange('recordingStart');
     }
 
-    async stopRecording() {
-        if (!this.isRecording) return;
-        this.isRecording = false;
-        if (this.keypointsBuffer.length < 5) {
-            this.options.onStatusChange('tooShort');
-            return;
-        }
-        this.options.onStatusChange('sending', { frameCount: this.keypointsBuffer.length });
+    // 向后端发送一段帧序列，返回 { word, confidence } 或 null
+    async _sendFrames(frames) {
         try {
-            // 将每个帧的关键点展平为一维数组
-            const flattenedFrames = this.keypointsBuffer.map(frame => frame.flat());
             const response = await fetch(`${this.recognitionApiUrl}/recognize`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ frames: flattenedFrames })
+                body: JSON.stringify({ frames: frames.map(f => f.flat()) })
             });
             const result = await response.json();
-            if (!response.ok) {
-                throw new Error(result.detail || `HTTP ${response.status}`);
+            if (response.ok && result.word) {
+                return { word: result.word, confidence: result.confidence || 0.8 };
             }
-            if (result.word) {
-                const prediction = result.word;
-                const confidence = result.confidence || 0.8;
-                this.displayResult(prediction, confidence);
-                this.options.onResult({
-                    prediction: prediction,
-                    confidence: confidence,
-                    topPredictions: []
-                });
-                this.options.onStatusChange('resultReady', { prediction, confidence, topPredictions: [] });
+            return null;
+        } catch (e) {
+            return null;
+        }
+    }
+
+    async stopRecording() {
+        if (!this.isRecording) return;
+        this.isRecording = false;
+        const buffer = this.keypointsBuffer;
+        if (buffer.length < 5) {
+            this.options.onStatusChange('tooShort');
+            return;
+        }
+        this.options.onStatusChange('sending', { frameCount: buffer.length });
+        try {
+            let predictions = [];
+
+            if (buffer.length <= this.WINDOW_SIZE) {
+                // 帧数较少，直接发送整段
+                const r = await this._sendFrames(buffer);
+                if (r) predictions.push(r);
             } else {
+                // 滑动窗口：生成多个重叠子窗口 + 完整序列，并行发送
+                const windowBufs = [];
+                for (let start = 0; start + this.WINDOW_SIZE <= buffer.length; start += this.WINDOW_STRIDE) {
+                    windowBufs.push(buffer.slice(start, start + this.WINDOW_SIZE));
+                    if (windowBufs.length >= this.MAX_WINDOWS) break;
+                }
+                windowBufs.push(buffer); // 完整序列也参与投票
+                const results = await Promise.all(windowBufs.map(w => this._sendFrames(w)));
+                predictions = results.filter(Boolean);
+            }
+
+            if (!predictions.length) {
                 this.options.onStatusChange('recognitionFailed');
+                return;
+            }
+
+            // 多窗口投票：选出出现次数最多的词
+            const counts = {};
+            let bestWord = predictions[0].word, bestConf = predictions[0].confidence, maxCount = 0;
+            for (const p of predictions) {
+                counts[p.word] = (counts[p.word] || 0) + 1;
+                if (counts[p.word] > maxCount) {
+                    maxCount = counts[p.word];
+                    bestWord = p.word;
+                    bestConf = p.confidence;
+                }
+            }
+
+            this.displayResult(bestWord, bestConf);
+            this.options.onResult({ prediction: bestWord, confidence: bestConf, topPredictions: [] });
+            this.options.onStatusChange('resultReady', { prediction: bestWord, confidence: bestConf, topPredictions: [] });
+            if (this.continuousMode) {
+                this.options.onStatusChange('continuousReady');
             }
         } catch (error) {
             console.error('Recognition error:', error);
@@ -250,6 +338,32 @@ export class SignLanguageAgent {
     }
 
     displayResult(prediction, confidence) {
+        // 连续识别模式：跳过稳定性投票，直接输出，仅做短时去重
+        if (this.continuousMode) {
+            const now = Date.now();
+            // 检查最近 WORD_DEDUPE_WINDOW 内是否已识别过相同词
+            this.lastRecognizedWords = this.lastRecognizedWords.filter(
+                r => now - r.time < this.WORD_DEDUPE_WINDOW
+            );
+            const isDupe = this.lastRecognizedWords.some(r => r.word === prediction);
+            if (!isDupe) {
+                this.lastRecognizedWords.push({ word: prediction, time: now });
+                this.options.onWordRecognized(prediction, confidence);
+                this.sentenceWords.push(prediction);
+                if (this.sentenceTimer) clearTimeout(this.sentenceTimer);
+                this.sentenceTimer = setTimeout(() => {
+                    if (this.sentenceWords.length > 0) {
+                        this.options.onSentenceComplete([...this.sentenceWords]);
+                        this.sentenceWords = [];
+                    }
+                    this.sentenceTimer = null;
+                }, this.SENTENCE_TIMEOUT);
+            }
+            this.options.onResult({ prediction, confidence, topPredictions: [] });
+            return;
+        }
+
+        // 非连续模式：保留原有稳定性投票逻辑
         this.predictionBuffer.push(prediction);
         if (this.predictionBuffer.length > this.BUFFER_SIZE) this.predictionBuffer.shift();
         const counts = {};
@@ -264,18 +378,20 @@ export class SignLanguageAgent {
         if (maxCount >= Math.ceil(this.BUFFER_SIZE / 2)) {
             if (this.lastDisplayedPrediction !== finalPrediction) {
                 this.lastDisplayedPrediction = finalPrediction;
+                this.options.onWordRecognized(finalPrediction, confidence);
+                this.sentenceWords.push(finalPrediction);
+                if (this.sentenceTimer) clearTimeout(this.sentenceTimer);
+                this.sentenceTimer = setTimeout(() => {
+                    if (this.sentenceWords.length > 0) {
+                        this.options.onSentenceComplete([...this.sentenceWords]);
+                        this.sentenceWords = [];
+                    }
+                    this.sentenceTimer = null;
+                }, this.SENTENCE_TIMEOUT);
             }
-            this.options.onResult({
-                prediction: finalPrediction,
-                confidence: confidence,
-                topPredictions: []
-            });
+            this.options.onResult({ prediction: finalPrediction, confidence, topPredictions: [] });
         } else {
-            this.options.onResult({
-                prediction: `${prediction}?`,
-                confidence: confidence,
-                topPredictions: []
-            });
+            this.options.onResult({ prediction: `${prediction}?`, confidence, topPredictions: [] });
         }
     }
 
@@ -284,6 +400,33 @@ export class SignLanguageAgent {
         this.lastDisplayedPrediction = null;
     }
 
+    clearSentenceBuffer() {
+        if (this.sentenceTimer) {
+            clearTimeout(this.sentenceTimer);
+            this.sentenceTimer = null;
+        }
+        this.sentenceWords = [];
+    }
+
+    startContinuous() {
+        if (!this.cameraStarted) return;
+        this.continuousMode = true;
+        this.noHandFrames = 0;
+        this.options.onStatusChange('continuousStart');
+    }
+
+    stopContinuous() {
+        this.continuousMode = false;
+        if (this.isRecording) {
+            this.isRecording = false;
+            this.keypointsBuffer = [];
+            this.frameCount = 0;
+        }
+        this.noHandFrames = 0;
+        this.options.onStatusChange('continuousStop');
+    }
+
+    // 以下方法保留但自动化模式下可能不再需要
     async confirmWord(label, isAuto = false) {
         try {
             // 调用原有后端确认词接口（序列管理）
