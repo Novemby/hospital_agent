@@ -63,6 +63,14 @@ export class SignLanguageAgent {
         this.MIN_SIGN_FRAMES = 10;     // 有效手势最少帧数
         this.MAX_SIGN_FRAMES = 150;    // 最大帧数（~5s），防止无限录制
 
+        // 速度检测参数
+        this.lastHandPositions = null;  // 上一帧的手部位置 {left: {x, y, z}, right: {x, y, z}}
+        this.velocityBuffer = [];       // 速度历史缓冲区
+        this.VELOCITY_BUFFER_SIZE = 5;  // 速度平滑窗口
+        this.LOW_VELOCITY_THRESHOLD = 0.01;  // 低速阈值（归一化坐标）
+        this.LOW_VELOCITY_FRAMES = 8;   // 连续低速帧数阈值
+        this.lowVelocityCount = 0;      // 当前连续低速帧计数
+
         // 句子级别的端点检测
         this.sentenceWords = [];       // 累积的词汇
         this.sentenceTimer = null;     // 句子超时计时器
@@ -135,6 +143,62 @@ export class SignLanguageAgent {
         return frame; // 长度应为 132 + 63 + 63 = 258
     }
 
+    // 计算手部中心位置（用于速度检测）
+    calculateHandCenter(handLandmarks) {
+        if (!handLandmarks || handLandmarks.length === 0) return null;
+        let sumX = 0, sumY = 0, sumZ = 0;
+        for (const lm of handLandmarks) {
+            sumX += lm.x;
+            sumY += lm.y;
+            sumZ += lm.z;
+        }
+        const n = handLandmarks.length;
+        return { x: sumX / n, y: sumY / n, z: sumZ / n };
+    }
+
+    // 计算两个3D点之间的欧氏距离
+    calculateDistance(p1, p2) {
+        if (!p1 || !p2) return 0;
+        const dx = p1.x - p2.x;
+        const dy = p1.y - p2.y;
+        const dz = p1.z - p2.z;
+        return Math.sqrt(dx * dx + dy * dy + dz * dz);
+    }
+
+    // 计算当前帧的手部速度
+    calculateHandVelocity(results) {
+        const currentPositions = {
+            left: this.calculateHandCenter(results.leftHandLandmarks),
+            right: this.calculateHandCenter(results.rightHandLandmarks)
+        };
+
+        if (!this.lastHandPositions) {
+            this.lastHandPositions = currentPositions;
+            return 0;
+        }
+
+        // 计算左右手的速度，取最大值
+        let maxVelocity = 0;
+        if (currentPositions.left && this.lastHandPositions.left) {
+            const leftVel = this.calculateDistance(currentPositions.left, this.lastHandPositions.left);
+            maxVelocity = Math.max(maxVelocity, leftVel);
+        }
+        if (currentPositions.right && this.lastHandPositions.right) {
+            const rightVel = this.calculateDistance(currentPositions.right, this.lastHandPositions.right);
+            maxVelocity = Math.max(maxVelocity, rightVel);
+        }
+
+        this.lastHandPositions = currentPositions;
+        return maxVelocity;
+    }
+
+    // 判断是否处于低速状态（动作结束）
+    isLowVelocity() {
+        if (this.velocityBuffer.length < this.VELOCITY_BUFFER_SIZE) return false;
+        const avgVelocity = this.velocityBuffer.reduce((a, b) => a + b, 0) / this.velocityBuffer.length;
+        return avgVelocity < this.LOW_VELOCITY_THRESHOLD;
+    }
+
     onHolisticResults(results) {
         if (!this.canvas) return;
         this.canvas.width = this.webcam.videoWidth;
@@ -174,14 +238,29 @@ export class SignLanguageAgent {
         // 连续识别逻辑
         if (this.continuousMode) {
             const handsPresent = !!(results.leftHandLandmarks || results.rightHandLandmarks);
+
             if (handsPresent) {
-                this.noHandFrames = 0;
-                if (!this.isRecording) {
+                // 计算手部速度
+                const velocity = this.calculateHandVelocity(results);
+                this.velocityBuffer.push(velocity);
+                if (this.velocityBuffer.length > this.VELOCITY_BUFFER_SIZE) {
+                    this.velocityBuffer.shift();
+                }
+
+                // 检测低速状态
+                if (this.isLowVelocity()) {
+                    this.lowVelocityCount++;
+                } else {
+                    this.lowVelocityCount = 0;
+                }
+
+                // 开始录制（检测到手部且速度较高）
+                if (!this.isRecording && !this.isLowVelocity()) {
                     this.startRecording();
                 }
-            } else if (this.isRecording) {
-                this.noHandFrames++;
-                if (this.noHandFrames >= this.NO_HAND_THRESHOLD) {
+
+                // 触发识别（连续低速）
+                if (this.isRecording && this.lowVelocityCount >= this.LOW_VELOCITY_FRAMES) {
                     if (this.keypointsBuffer.length >= this.MIN_SIGN_FRAMES) {
                         this.stopRecording();
                     } else {
@@ -189,11 +268,34 @@ export class SignLanguageAgent {
                         this.isRecording = false;
                         this.keypointsBuffer = [];
                         this.frameCount = 0;
-                        this.noHandFrames = 0;
+                        this.lowVelocityCount = 0;
+                        this.velocityBuffer = [];
                         this.options.onStatusChange('continuousReady');
                     }
                 }
+            } else {
+                // 手部消失，重置状态
+                if (this.isRecording) {
+                    this.noHandFrames++;
+                    if (this.noHandFrames >= this.NO_HAND_THRESHOLD) {
+                        if (this.keypointsBuffer.length >= this.MIN_SIGN_FRAMES) {
+                            this.stopRecording();
+                        } else {
+                            this.isRecording = false;
+                            this.keypointsBuffer = [];
+                            this.frameCount = 0;
+                            this.noHandFrames = 0;
+                            this.options.onStatusChange('continuousReady');
+                        }
+                    }
+                } else {
+                    this.noHandFrames = 0;
+                    this.lowVelocityCount = 0;
+                    this.velocityBuffer = [];
+                    this.lastHandPositions = null;
+                }
             }
+
             // 防止录制超时
             if (this.isRecording && this.keypointsBuffer.length >= this.MAX_SIGN_FRAMES) {
                 this.stopRecording();
@@ -412,6 +514,9 @@ export class SignLanguageAgent {
         if (!this.cameraStarted) return;
         this.continuousMode = true;
         this.noHandFrames = 0;
+        this.lowVelocityCount = 0;
+        this.velocityBuffer = [];
+        this.lastHandPositions = null;
         this.options.onStatusChange('continuousStart');
     }
 
@@ -423,6 +528,9 @@ export class SignLanguageAgent {
             this.frameCount = 0;
         }
         this.noHandFrames = 0;
+        this.lowVelocityCount = 0;
+        this.velocityBuffer = [];
+        this.lastHandPositions = null;
         this.options.onStatusChange('continuousStop');
     }
 
