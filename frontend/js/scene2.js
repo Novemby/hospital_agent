@@ -43,12 +43,11 @@ const app = createApp({
         let handsignWindow = null;
         let windowCheckInterval = null;
 
-        // ========== 4. 医生语音转文字功能 ==========
+        // ========== 4. 医生语音转文字功能 (实时识别) ==========
         const isRecordingVoiceForDoc = ref(false);
         const doctorVoiceText = ref('');
         const doctorRecognizedText = ref('');
-        let mediaRecorderDoc = null;
-        let audioChunksDoc = [];
+        let recognition = null;
 
         // 🌟 双向聊天记录 computed (现在放到 selectedPatient 后面，非常安全)
         const chatContainerDoc = ref(null);
@@ -76,67 +75,84 @@ const app = createApp({
             onHeadGesture: () => {}
         });
 
-        // ========== 6. 医生操作方法 ==========
-        const startDoctorVoiceRecording = async () => {
-            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-                alert('您的浏览器不支持语音输入');
+        // ========== 6. 医生操作方法 (实时语音识别) ==========
+        const startDoctorVoiceRecording = () => {
+            // 检查浏览器支持
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            if (!SpeechRecognition) {
+                alert('您的浏览器不支持实时语音识别，请使用 Chrome、Edge 或 Safari');
                 return;
             }
+
             try {
-                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                mediaRecorderDoc = new MediaRecorder(stream);
-                audioChunksDoc = [];
-                mediaRecorderDoc.ondataavailable = event => {
-                    audioChunksDoc.push(event.data);
+                recognition = new SpeechRecognition();
+                recognition.lang = 'zh-CN'; // 设置为中文
+                recognition.continuous = true; // 连续识别
+                recognition.interimResults = true; // 返回临时结果
+
+                // 实时识别结果
+                recognition.onresult = (event) => {
+                    let interimTranscript = '';
+                    let finalTranscript = '';
+
+                    for (let i = event.resultIndex; i < event.results.length; i++) {
+                        const transcript = event.results[i][0].transcript;
+                        if (event.results[i].isFinal) {
+                            finalTranscript += transcript;
+                        } else {
+                            interimTranscript += transcript;
+                        }
+                    }
+
+                    // 实时更新识别文本（临时结果）
+                    if (interimTranscript) {
+                        doctorRecognizedText.value = interimTranscript;
+                    }
+
+                    // 确认的结果追加到输入框
+                    if (finalTranscript) {
+                        doctorVoiceText.value += finalTranscript;
+                        doctorRecognizedText.value = ''; // 清空临时结果
+                    }
                 };
-                mediaRecorderDoc.onstop = () => {
-                    const audioBlob = new Blob(audioChunksDoc, { type: 'audio/webm' });
-                    sendVoiceToBackendForDoc(audioBlob);
-                    stream.getTracks().forEach(track => track.stop());
+
+                recognition.onerror = (event) => {
+                    console.error('语音识别错误:', event.error);
+                    if (event.error === 'no-speech') {
+                        // 没有检测到语音，不提示错误
+                        return;
+                    }
+                    alert('语音识别出错: ' + event.error);
+                    stopDoctorVoiceRecording();
                 };
-                mediaRecorderDoc.start();
+
+                recognition.onend = () => {
+                    // 如果还在录音状态，自动重启（保持连续识别）
+                    if (isRecordingVoiceForDoc.value) {
+                        try {
+                            recognition.start();
+                        } catch (e) {
+                            console.warn('重启识别失败:', e);
+                        }
+                    }
+                };
+
+                recognition.start();
                 isRecordingVoiceForDoc.value = true;
             } catch (error) {
-                alert('无法访问麦克风: ' + error.message);
+                alert('启动语音识别失败: ' + error.message);
             }
         };
 
         const stopDoctorVoiceRecording = () => {
-            if (mediaRecorderDoc && isRecordingVoiceForDoc.value) {
-                mediaRecorderDoc.stop();
+            if (recognition && isRecordingVoiceForDoc.value) {
                 isRecordingVoiceForDoc.value = false;
+                recognition.stop();
+                recognition = null;
+                doctorRecognizedText.value = ''; // 清空临时识别结果
             }
         };
 
-        const sendVoiceToBackendForDoc = async (audioBlob) => {
-            const formData = new FormData();
-            formData.append('audio', audioBlob);
-            try {
-                const response = await fetch('http://localhost:8000/speech-to-text', {
-                    method: 'POST',
-                    body: formData
-                });
-                const result = await response.json();
-                if (result.success) {
-                    doctorRecognizedText.value = result.text;
-                } else {
-                    alert('语音识别失败');
-                }
-            } catch (error) {
-                alert('语音识别服务连接失败');
-            }
-        };
-
-        const confirmDoctorVoiceText = () => {
-            if (doctorRecognizedText.value.trim()) {
-                doctorVoiceText.value = doctorRecognizedText.value;
-                doctorRecognizedText.value = '';
-            }
-        };
-
-        const cancelDoctorVoiceText = () => {
-            doctorRecognizedText.value = '';
-        };
 
         const sendDoctorVoiceMessage = () => {
             if (!doctorVoiceText.value.trim() || !selectedPatient.value) return;
@@ -419,7 +435,7 @@ const app = createApp({
             isHandsignOpen,
             doctorVoiceText, doctorRecognizedText, isRecordingVoiceForDoc,
             startDoctorVoiceRecording, stopDoctorVoiceRecording,
-            confirmDoctorVoiceText, cancelDoctorVoiceText, sendDoctorVoiceMessage,
+            sendDoctorVoiceMessage,
             chatMessages, chatContainerDoc, formatTime
         };
     },
@@ -678,24 +694,23 @@ const app = createApp({
                                     <h3 class="font-bold text-base flex items-center gap-2 mb-3 text-purple-900">
                                         <span class="w-1.5 h-4 bg-purple-500 rounded-full"></span>向患者发送医嘱
                                     </h3>
-                                    
-                                    <div v-if="doctorRecognizedText" class="mb-3 p-2 bg-yellow-50 border border-yellow-200 rounded-lg">
-                                        <div class="text-xs text-yellow-600 mb-1 font-medium">语音识别结果：</div>
-                                        <div class="flex items-center gap-2">
-                                            <span class="flex-1 text-gray-800 text-sm">{{ doctorRecognizedText }}</span>
-                                            <button @click="confirmDoctorVoiceText" class="bg-green-500 text-white px-2 py-1 rounded text-xs">✓</button>
-                                            <button @click="cancelDoctorVoiceText" class="bg-gray-300 text-gray-700 px-2 py-1 rounded text-xs">✗</button>
+
+                                    <div v-if="doctorRecognizedText" class="mb-3 p-2 bg-blue-50 border border-blue-200 rounded-lg">
+                                        <div class="text-xs text-blue-600 mb-1 font-medium flex items-center gap-1">
+                                            <span class="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></span>
+                                            正在识别...
                                         </div>
+                                        <div class="text-gray-800 text-sm">{{ doctorRecognizedText }}</div>
                                     </div>
 
-                                    <textarea v-model="doctorVoiceText" rows="2" placeholder="输入文字或录音..." class="w-full border border-gray-200 rounded-lg p-2 text-sm focus:ring-2 focus:ring-purple-200 outline-none mb-3 resize-none"></textarea>
-                                    
+                                    <textarea v-model="doctorVoiceText" rows="2" placeholder="输入文字或点击语音输入..." class="w-full border border-gray-200 rounded-lg p-2 text-sm focus:ring-2 focus:ring-purple-200 outline-none mb-3 resize-none"></textarea>
+
                                     <div class="flex items-center justify-between">
-                                        <button @click="isRecordingVoiceForDoc ? stopDoctorVoiceRecording() : startDoctorVoiceRecording()" 
+                                        <button @click="isRecordingVoiceForDoc ? stopDoctorVoiceRecording() : startDoctorVoiceRecording()"
                                                 :class="isRecordingVoiceForDoc ? 'bg-red-500 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'"
                                                 class="px-3 py-1.5 rounded-lg text-sm flex items-center gap-1 font-medium transition-colors">
-                                            <span v-if="!isRecordingVoiceForDoc">🎤 录音</span>
-                                            <span v-else>⏹ 结束</span>
+                                            <span v-if="!isRecordingVoiceForDoc">🎤 实时语音</span>
+                                            <span v-else>⏹ 停止</span>
                                             <span v-if="isRecordingVoiceForDoc" class="w-2 h-2 rounded-full bg-white animate-ping ml-1"></span>
                                         </button>
                                         <button @click="sendDoctorVoiceMessage" class="bg-purple-600 text-white px-4 py-1.5 rounded-lg hover:bg-purple-700 text-sm font-medium shadow-sm transition-colors">

@@ -1,0 +1,2601 @@
+{
+  "metadata": {
+    "dataset_name": "智能分诊Agent测试数据集",
+    "version": "1.0",
+    "created_at": "2026-03-31T16:23:39.827447",
+    "total_samples": 200,
+    "categories": {
+      "clear_symptoms": 50,
+      "vague_symptoms": 50,
+      "multi_turn": 50,
+      "edge_cases": 50
+    }
+  },
+  "test_cases": {
+    "clear_symptoms": [
+      {
+        "input": "我头痛,已经持续3天了",
+        "expected": {
+          "department": "神经内科",
+          "symptom_struct": {
+            "primary_symptom": "头痛",
+            "body_part": "头部",
+            "duration": "1-3天",
+            "severity": null,
+            "accompanying_symptoms": []
+          },
+          "strategy": "proceed_to_slots"
+        }
+      },
+      {
+        "input": "右上腹疼痛,吃完饭后更严重,大概一周了",
+        "expected": {
+          "department": "消化内科",
+          "symptom_struct": {
+            "primary_symptom": "疼痛",
+            "body_part": "右上腹",
+            "duration": "超过1周",
+            "severity": "中度",
+            "accompanying_symptoms": [
+              "餐后加重"
+            ]
+          },
+          "strategy": "proceed_to_slots"
+        }
+      },
+      {
+        "input": "咳嗽发烧,喉咙痛,今天早上开始的",
+        "expected": {
+          "department": "呼吸内科",
+          "symptom_struct": {
+            "primary_symptom": "咳嗽",
+            "body_part": "呼吸道",
+            "duration": "今天刚开始",
+            "severity": null,
+            "accompanying_symptoms": [
+              "发烧",
+              "喉咙痛"
+            ]
+          },
+          "strategy": "proceed_to_slots"
+        }
+      },
+      {
+        "input": "左膝盖疼,走路的时候特别明显,已经两个月了",
+        "expected": {
+          "department": "骨科",
+          "symptom_struct": {
+            "primary_symptom": "疼痛",
+            "body_part": "左膝盖",
+            "duration": "很久了",
+            "severity": "中度",
+            "accompanying_symptoms": [
+              "活动时加重"
+            ]
+          },
+          "strategy": "proceed_to_slots"
+        }
+      },
+      {
+        "input": "胸闷气短,爬楼梯就喘,持续一周多了",
+        "expected": {
+          "department": "心内科",
+          "symptom_struct": {
+            "primary_symptom": "胸闷",
+            "body_part": "胸部",
+            "duration": "超过1周",
+            "severity": "中度",
+            "accompanying_symptoms": [
+              "气短",
+              "活动后加重"
+            ]
+          },
+          "strategy": "proceed_to_slots"
+        }
+      },
+      {
+        "input": "上部腹部恶心,持续今天刚开始",
+        "expected": {
+          "department": "消化内科",
+          "symptom_struct": {
+            "primary_symptom": "恶心",
+            "body_part": "上部腹部",
+            "duration": "今天刚开始",
+            "severity": null,
+            "accompanying_symptoms": []
+          },
+          "strategy": "proceed_to_slots"
+        }
+      },
+      {
+        "input": "右侧胸部心悸,持续1-3天",
+        "expected": {
+          "department": "心内科",
+          "symptom_struct": {
+            "primary_symptom": "心悸",
+            "body_part": "右侧胸部",
+            "duration": "1-3天",
+            "severity": null,
+            "accompanying_symptoms": []
+          },
+          "strategy": "proceed_to_slots"
+        }
+      },
+      {
+        "input": "腹部恶心,持续今天刚开始",
+        "expected": {
+          "department": "消化内科",
+          "symptom_struct": {
+            "primary_symptom": "恶心",
+            "body_part": "腹部",
+            "duration": "今天刚开始",
+            "severity": null,
+            "accompanying_symptoms": []
+          },
+          "strategy": "proceed_to_slots"
+        }
+      },
+      {
+        "input": "左侧眼部视力模糊,持续今天刚开始",
+        "expected": {
+          "department": "眼科",
+          "symptom_struct": {
+            "primary_symptom": "视力模糊",
+            "body_part": "左侧眼部",
+            "duration": "今天刚开始",
+            "severity": null,
+            "accompanying_symptoms": []
+          },
+          "strategy": "proceed_to_slots"
+        }
+      },
+      {
+        "input": "右侧腹部恶心,持续1-3天",
+        "expected": {
+          "department": "消化内科",
+          "symptom_struct": {
+            "primary_symptom": "恶心",
+            "body_part": "右侧腹部",
+            "duration": "1-3天",
+            "severity": null,
+            "accompanying_symptoms": []
+          },
+          "strategy": "proceed_to_slots"
+        }
+      },
+      {
+        "input": "关节关节肿胀,持续今天刚开始",
+        "expected": {
+          "department": "骨科",
+          "symptom_struct": {
+            "primary_symptom": "关节肿胀",
+            "body_part": "关节",
+            "duration": "今天刚开始",
+            "severity": null,
+            "accompanying_symptoms": []
+          },
+          "strategy": "proceed_to_slots"
+        }
+      },
+      {
+        "input": "右侧胸部心悸,持续很久了",
+        "expected": {
+          "department": "心内科",
+          "symptom_struct": {
+            "primary_symptom": "心悸",
+            "body_part": "右侧胸部",
+            "duration": "很久了",
+            "severity": null,
+            "accompanying_symptoms": []
+          },
+          "strategy": "proceed_to_slots"
+        }
+      },
+      {
+        "input": "左侧皮肤皮疹,持续超过1周",
+        "expected": {
+          "department": "皮肤科",
+          "symptom_struct": {
+            "primary_symptom": "皮疹",
+            "body_part": "左侧皮肤",
+            "duration": "超过1周",
+            "severity": null,
+            "accompanying_symptoms": []
+          },
+          "strategy": "proceed_to_slots"
+        }
+      },
+      {
+        "input": "上部腹部腹泻,持续很久了",
+        "expected": {
+          "department": "消化内科",
+          "symptom_struct": {
+            "primary_symptom": "腹泻",
+            "body_part": "上部腹部",
+            "duration": "很久了",
+            "severity": null,
+            "accompanying_symptoms": []
+          },
+          "strategy": "proceed_to_slots"
+        }
+      },
+      {
+        "input": "右侧鼻部流鼻涕,持续1-3天",
+        "expected": {
+          "department": "耳鼻喉科",
+          "symptom_struct": {
+            "primary_symptom": "流鼻涕",
+            "body_part": "右侧鼻部",
+            "duration": "1-3天",
+            "severity": null,
+            "accompanying_symptoms": []
+          },
+          "strategy": "proceed_to_slots"
+        }
+      },
+      {
+        "input": "左侧耳部耳鸣,持续今天刚开始",
+        "expected": {
+          "department": "耳鼻喉科",
+          "symptom_struct": {
+            "primary_symptom": "耳鸣",
+            "body_part": "左侧耳部",
+            "duration": "今天刚开始",
+            "severity": null,
+            "accompanying_symptoms": []
+          },
+          "strategy": "proceed_to_slots"
+        }
+      },
+      {
+        "input": "上部眼部视力模糊,持续今天刚开始",
+        "expected": {
+          "department": "眼科",
+          "symptom_struct": {
+            "primary_symptom": "视力模糊",
+            "body_part": "上部眼部",
+            "duration": "今天刚开始",
+            "severity": null,
+            "accompanying_symptoms": []
+          },
+          "strategy": "proceed_to_slots"
+        }
+      },
+      {
+        "input": "左侧耳部耳鸣,持续超过1周",
+        "expected": {
+          "department": "耳鼻喉科",
+          "symptom_struct": {
+            "primary_symptom": "耳鸣",
+            "body_part": "左侧耳部",
+            "duration": "超过1周",
+            "severity": null,
+            "accompanying_symptoms": []
+          },
+          "strategy": "proceed_to_slots"
+        }
+      },
+      {
+        "input": "下部皮肤皮疹,持续今天刚开始",
+        "expected": {
+          "department": "皮肤科",
+          "symptom_struct": {
+            "primary_symptom": "皮疹",
+            "body_part": "下部皮肤",
+            "duration": "今天刚开始",
+            "severity": null,
+            "accompanying_symptoms": []
+          },
+          "strategy": "proceed_to_slots"
+        }
+      },
+      {
+        "input": "腹部恶心,持续超过1周",
+        "expected": {
+          "department": "消化内科",
+          "symptom_struct": {
+            "primary_symptom": "恶心",
+            "body_part": "腹部",
+            "duration": "超过1周",
+            "severity": null,
+            "accompanying_symptoms": []
+          },
+          "strategy": "proceed_to_slots"
+        }
+      },
+      {
+        "input": "左侧耳部耳鸣,持续1-3天",
+        "expected": {
+          "department": "耳鼻喉科",
+          "symptom_struct": {
+            "primary_symptom": "耳鸣",
+            "body_part": "左侧耳部",
+            "duration": "1-3天",
+            "severity": null,
+            "accompanying_symptoms": []
+          },
+          "strategy": "proceed_to_slots"
+        }
+      },
+      {
+        "input": "上部头部头晕,持续1-3天",
+        "expected": {
+          "department": "神经内科",
+          "symptom_struct": {
+            "primary_symptom": "头晕",
+            "body_part": "上部头部",
+            "duration": "1-3天",
+            "severity": null,
+            "accompanying_symptoms": []
+          },
+          "strategy": "proceed_to_slots"
+        }
+      },
+      {
+        "input": "左侧腹部恶心,持续1-3天",
+        "expected": {
+          "department": "消化内科",
+          "symptom_struct": {
+            "primary_symptom": "恶心",
+            "body_part": "左侧腹部",
+            "duration": "1-3天",
+            "severity": null,
+            "accompanying_symptoms": []
+          },
+          "strategy": "proceed_to_slots"
+        }
+      },
+      {
+        "input": "下部眼部视力模糊,持续超过1周",
+        "expected": {
+          "department": "眼科",
+          "symptom_struct": {
+            "primary_symptom": "视力模糊",
+            "body_part": "下部眼部",
+            "duration": "超过1周",
+            "severity": null,
+            "accompanying_symptoms": []
+          },
+          "strategy": "proceed_to_slots"
+        }
+      },
+      {
+        "input": "上部耳部耳鸣,持续1-3天",
+        "expected": {
+          "department": "耳鼻喉科",
+          "symptom_struct": {
+            "primary_symptom": "耳鸣",
+            "body_part": "上部耳部",
+            "duration": "1-3天",
+            "severity": null,
+            "accompanying_symptoms": []
+          },
+          "strategy": "proceed_to_slots"
+        }
+      },
+      {
+        "input": "上部耳部耳鸣,持续1-3天",
+        "expected": {
+          "department": "耳鼻喉科",
+          "symptom_struct": {
+            "primary_symptom": "耳鸣",
+            "body_part": "上部耳部",
+            "duration": "1-3天",
+            "severity": null,
+            "accompanying_symptoms": []
+          },
+          "strategy": "proceed_to_slots"
+        }
+      },
+      {
+        "input": "腹部恶心,持续1-3天",
+        "expected": {
+          "department": "消化内科",
+          "symptom_struct": {
+            "primary_symptom": "恶心",
+            "body_part": "腹部",
+            "duration": "1-3天",
+            "severity": null,
+            "accompanying_symptoms": []
+          },
+          "strategy": "proceed_to_slots"
+        }
+      },
+      {
+        "input": "下部胸部心悸,持续1-3天",
+        "expected": {
+          "department": "心内科",
+          "symptom_struct": {
+            "primary_symptom": "心悸",
+            "body_part": "下部胸部",
+            "duration": "1-3天",
+            "severity": null,
+            "accompanying_symptoms": []
+          },
+          "strategy": "proceed_to_slots"
+        }
+      },
+      {
+        "input": "眼部视力模糊,持续超过1周",
+        "expected": {
+          "department": "眼科",
+          "symptom_struct": {
+            "primary_symptom": "视力模糊",
+            "body_part": "眼部",
+            "duration": "超过1周",
+            "severity": null,
+            "accompanying_symptoms": []
+          },
+          "strategy": "proceed_to_slots"
+        }
+      },
+      {
+        "input": "左侧胸部心悸,持续超过1周",
+        "expected": {
+          "department": "心内科",
+          "symptom_struct": {
+            "primary_symptom": "心悸",
+            "body_part": "左侧胸部",
+            "duration": "超过1周",
+            "severity": null,
+            "accompanying_symptoms": []
+          },
+          "strategy": "proceed_to_slots"
+        }
+      },
+      {
+        "input": "上部胸部心悸,持续今天刚开始",
+        "expected": {
+          "department": "心内科",
+          "symptom_struct": {
+            "primary_symptom": "心悸",
+            "body_part": "上部胸部",
+            "duration": "今天刚开始",
+            "severity": null,
+            "accompanying_symptoms": []
+          },
+          "strategy": "proceed_to_slots"
+        }
+      },
+      {
+        "input": "左侧眼部视力模糊,持续超过1周",
+        "expected": {
+          "department": "眼科",
+          "symptom_struct": {
+            "primary_symptom": "视力模糊",
+            "body_part": "左侧眼部",
+            "duration": "超过1周",
+            "severity": null,
+            "accompanying_symptoms": []
+          },
+          "strategy": "proceed_to_slots"
+        }
+      },
+      {
+        "input": "右侧胸部心悸,持续超过1周",
+        "expected": {
+          "department": "心内科",
+          "symptom_struct": {
+            "primary_symptom": "心悸",
+            "body_part": "右侧胸部",
+            "duration": "超过1周",
+            "severity": null,
+            "accompanying_symptoms": []
+          },
+          "strategy": "proceed_to_slots"
+        }
+      },
+      {
+        "input": "下部皮肤皮疹,持续很久了",
+        "expected": {
+          "department": "皮肤科",
+          "symptom_struct": {
+            "primary_symptom": "皮疹",
+            "body_part": "下部皮肤",
+            "duration": "很久了",
+            "severity": null,
+            "accompanying_symptoms": []
+          },
+          "strategy": "proceed_to_slots"
+        }
+      },
+      {
+        "input": "右侧腹部腹泻,持续超过1周",
+        "expected": {
+          "department": "消化内科",
+          "symptom_struct": {
+            "primary_symptom": "腹泻",
+            "body_part": "右侧腹部",
+            "duration": "超过1周",
+            "severity": null,
+            "accompanying_symptoms": []
+          },
+          "strategy": "proceed_to_slots"
+        }
+      },
+      {
+        "input": "胸部心悸,持续超过1周",
+        "expected": {
+          "department": "心内科",
+          "symptom_struct": {
+            "primary_symptom": "心悸",
+            "body_part": "胸部",
+            "duration": "超过1周",
+            "severity": null,
+            "accompanying_symptoms": []
+          },
+          "strategy": "proceed_to_slots"
+        }
+      },
+      {
+        "input": "上部眼部视力模糊,持续很久了",
+        "expected": {
+          "department": "眼科",
+          "symptom_struct": {
+            "primary_symptom": "视力模糊",
+            "body_part": "上部眼部",
+            "duration": "很久了",
+            "severity": null,
+            "accompanying_symptoms": []
+          },
+          "strategy": "proceed_to_slots"
+        }
+      },
+      {
+        "input": "胸部心悸,持续1-3天",
+        "expected": {
+          "department": "心内科",
+          "symptom_struct": {
+            "primary_symptom": "心悸",
+            "body_part": "胸部",
+            "duration": "1-3天",
+            "severity": null,
+            "accompanying_symptoms": []
+          },
+          "strategy": "proceed_to_slots"
+        }
+      },
+      {
+        "input": "左侧皮肤皮疹,持续今天刚开始",
+        "expected": {
+          "department": "皮肤科",
+          "symptom_struct": {
+            "primary_symptom": "皮疹",
+            "body_part": "左侧皮肤",
+            "duration": "今天刚开始",
+            "severity": null,
+            "accompanying_symptoms": []
+          },
+          "strategy": "proceed_to_slots"
+        }
+      },
+      {
+        "input": "右侧腹部恶心,持续1-3天",
+        "expected": {
+          "department": "消化内科",
+          "symptom_struct": {
+            "primary_symptom": "恶心",
+            "body_part": "右侧腹部",
+            "duration": "1-3天",
+            "severity": null,
+            "accompanying_symptoms": []
+          },
+          "strategy": "proceed_to_slots"
+        }
+      },
+      {
+        "input": "下部眼部视力模糊,持续今天刚开始",
+        "expected": {
+          "department": "眼科",
+          "symptom_struct": {
+            "primary_symptom": "视力模糊",
+            "body_part": "下部眼部",
+            "duration": "今天刚开始",
+            "severity": null,
+            "accompanying_symptoms": []
+          },
+          "strategy": "proceed_to_slots"
+        }
+      },
+      {
+        "input": "眼部视力模糊,持续很久了",
+        "expected": {
+          "department": "眼科",
+          "symptom_struct": {
+            "primary_symptom": "视力模糊",
+            "body_part": "眼部",
+            "duration": "很久了",
+            "severity": null,
+            "accompanying_symptoms": []
+          },
+          "strategy": "proceed_to_slots"
+        }
+      },
+      {
+        "input": "左侧鼻部流鼻涕,持续今天刚开始",
+        "expected": {
+          "department": "耳鼻喉科",
+          "symptom_struct": {
+            "primary_symptom": "流鼻涕",
+            "body_part": "左侧鼻部",
+            "duration": "今天刚开始",
+            "severity": null,
+            "accompanying_symptoms": []
+          },
+          "strategy": "proceed_to_slots"
+        }
+      },
+      {
+        "input": "上部关节关节肿胀,持续超过1周",
+        "expected": {
+          "department": "骨科",
+          "symptom_struct": {
+            "primary_symptom": "关节肿胀",
+            "body_part": "上部关节",
+            "duration": "超过1周",
+            "severity": null,
+            "accompanying_symptoms": []
+          },
+          "strategy": "proceed_to_slots"
+        }
+      },
+      {
+        "input": "下部腹部恶心,持续超过1周",
+        "expected": {
+          "department": "消化内科",
+          "symptom_struct": {
+            "primary_symptom": "恶心",
+            "body_part": "下部腹部",
+            "duration": "超过1周",
+            "severity": null,
+            "accompanying_symptoms": []
+          },
+          "strategy": "proceed_to_slots"
+        }
+      },
+      {
+        "input": "左侧腹部腹泻,持续很久了",
+        "expected": {
+          "department": "消化内科",
+          "symptom_struct": {
+            "primary_symptom": "腹泻",
+            "body_part": "左侧腹部",
+            "duration": "很久了",
+            "severity": null,
+            "accompanying_symptoms": []
+          },
+          "strategy": "proceed_to_slots"
+        }
+      },
+      {
+        "input": "鼻部流鼻涕,持续1-3天",
+        "expected": {
+          "department": "耳鼻喉科",
+          "symptom_struct": {
+            "primary_symptom": "流鼻涕",
+            "body_part": "鼻部",
+            "duration": "1-3天",
+            "severity": null,
+            "accompanying_symptoms": []
+          },
+          "strategy": "proceed_to_slots"
+        }
+      },
+      {
+        "input": "腹部恶心,持续超过1周",
+        "expected": {
+          "department": "消化内科",
+          "symptom_struct": {
+            "primary_symptom": "恶心",
+            "body_part": "腹部",
+            "duration": "超过1周",
+            "severity": null,
+            "accompanying_symptoms": []
+          },
+          "strategy": "proceed_to_slots"
+        }
+      },
+      {
+        "input": "右侧泌尿系统尿频,持续1-3天",
+        "expected": {
+          "department": "泌尿外科",
+          "symptom_struct": {
+            "primary_symptom": "尿频",
+            "body_part": "右侧泌尿系统",
+            "duration": "1-3天",
+            "severity": null,
+            "accompanying_symptoms": []
+          },
+          "strategy": "proceed_to_slots"
+        }
+      },
+      {
+        "input": "耳部耳鸣,持续1-3天",
+        "expected": {
+          "department": "耳鼻喉科",
+          "symptom_struct": {
+            "primary_symptom": "耳鸣",
+            "body_part": "耳部",
+            "duration": "1-3天",
+            "severity": null,
+            "accompanying_symptoms": []
+          },
+          "strategy": "proceed_to_slots"
+        }
+      }
+    ],
+    "vague_symptoms": [
+      {
+        "input": "我不舒服",
+        "expected": {
+          "department": null,
+          "missing_fields": [
+            "primary_symptom",
+            "body_part",
+            "duration"
+          ],
+          "strategy": "collect_missing_info",
+          "next_question": "请问您具体哪里不舒服?"
+        }
+      },
+      {
+        "input": "头疼",
+        "expected": {
+          "department": "神经内科",
+          "symptom_struct": {
+            "primary_symptom": "头疼",
+            "body_part": "头部",
+            "duration": null
+          },
+          "missing_fields": [
+            "duration"
+          ],
+          "strategy": "collect_missing_info",
+          "next_question": "请问持续多久了?"
+        }
+      },
+      {
+        "input": "肚子有点不舒服",
+        "expected": {
+          "department": "消化内科",
+          "symptom_struct": {
+            "primary_symptom": "不适",
+            "body_part": "腹部",
+            "duration": null
+          },
+          "missing_fields": [
+            "duration"
+          ],
+          "strategy": "collect_missing_info"
+        }
+      },
+      {
+        "input": "疼",
+        "expected": {
+          "department": null,
+          "missing_fields": [
+            "body_part",
+            "duration"
+          ],
+          "strategy": "collect_missing_info"
+        }
+      },
+      {
+        "input": "有点难受",
+        "expected": {
+          "department": null,
+          "missing_fields": [
+            "primary_symptom",
+            "body_part",
+            "duration"
+          ],
+          "strategy": "collect_missing_info"
+        }
+      },
+      {
+        "input": "感觉不太好",
+        "expected": {
+          "department": null,
+          "missing_fields": [
+            "primary_symptom",
+            "body_part",
+            "duration"
+          ],
+          "strategy": "collect_missing_info"
+        }
+      },
+      {
+        "input": "疼",
+        "expected": {
+          "department": null,
+          "missing_fields": [
+            "body_part",
+            "duration"
+          ],
+          "strategy": "collect_missing_info"
+        }
+      },
+      {
+        "input": "疼",
+        "expected": {
+          "department": null,
+          "missing_fields": [
+            "body_part",
+            "duration"
+          ],
+          "strategy": "collect_missing_info"
+        }
+      },
+      {
+        "input": "有点难受",
+        "expected": {
+          "department": null,
+          "missing_fields": [
+            "primary_symptom",
+            "body_part",
+            "duration"
+          ],
+          "strategy": "collect_missing_info"
+        }
+      },
+      {
+        "input": "有点难受",
+        "expected": {
+          "department": null,
+          "missing_fields": [
+            "primary_symptom",
+            "body_part",
+            "duration"
+          ],
+          "strategy": "collect_missing_info"
+        }
+      },
+      {
+        "input": "不舒服",
+        "expected": {
+          "department": null,
+          "missing_fields": [
+            "primary_symptom",
+            "body_part",
+            "duration"
+          ],
+          "strategy": "collect_missing_info"
+        }
+      },
+      {
+        "input": "疼",
+        "expected": {
+          "department": null,
+          "missing_fields": [
+            "body_part",
+            "duration"
+          ],
+          "strategy": "collect_missing_info"
+        }
+      },
+      {
+        "input": "不舒服",
+        "expected": {
+          "department": null,
+          "missing_fields": [
+            "primary_symptom",
+            "body_part",
+            "duration"
+          ],
+          "strategy": "collect_missing_info"
+        }
+      },
+      {
+        "input": "疼",
+        "expected": {
+          "department": null,
+          "missing_fields": [
+            "body_part",
+            "duration"
+          ],
+          "strategy": "collect_missing_info"
+        }
+      },
+      {
+        "input": "疼",
+        "expected": {
+          "department": null,
+          "missing_fields": [
+            "body_part",
+            "duration"
+          ],
+          "strategy": "collect_missing_info"
+        }
+      },
+      {
+        "input": "感觉不太好",
+        "expected": {
+          "department": null,
+          "missing_fields": [
+            "primary_symptom",
+            "body_part",
+            "duration"
+          ],
+          "strategy": "collect_missing_info"
+        }
+      },
+      {
+        "input": "疼",
+        "expected": {
+          "department": null,
+          "missing_fields": [
+            "body_part",
+            "duration"
+          ],
+          "strategy": "collect_missing_info"
+        }
+      },
+      {
+        "input": "不舒服",
+        "expected": {
+          "department": null,
+          "missing_fields": [
+            "primary_symptom",
+            "body_part",
+            "duration"
+          ],
+          "strategy": "collect_missing_info"
+        }
+      },
+      {
+        "input": "不舒服",
+        "expected": {
+          "department": null,
+          "missing_fields": [
+            "primary_symptom",
+            "body_part",
+            "duration"
+          ],
+          "strategy": "collect_missing_info"
+        }
+      },
+      {
+        "input": "感觉不太好",
+        "expected": {
+          "department": null,
+          "missing_fields": [
+            "primary_symptom",
+            "body_part",
+            "duration"
+          ],
+          "strategy": "collect_missing_info"
+        }
+      },
+      {
+        "input": "不舒服",
+        "expected": {
+          "department": null,
+          "missing_fields": [
+            "primary_symptom",
+            "body_part",
+            "duration"
+          ],
+          "strategy": "collect_missing_info"
+        }
+      },
+      {
+        "input": "有点难受",
+        "expected": {
+          "department": null,
+          "missing_fields": [
+            "primary_symptom",
+            "body_part",
+            "duration"
+          ],
+          "strategy": "collect_missing_info"
+        }
+      },
+      {
+        "input": "感觉不太好",
+        "expected": {
+          "department": null,
+          "missing_fields": [
+            "primary_symptom",
+            "body_part",
+            "duration"
+          ],
+          "strategy": "collect_missing_info"
+        }
+      },
+      {
+        "input": "不舒服",
+        "expected": {
+          "department": null,
+          "missing_fields": [
+            "primary_symptom",
+            "body_part",
+            "duration"
+          ],
+          "strategy": "collect_missing_info"
+        }
+      },
+      {
+        "input": "不舒服",
+        "expected": {
+          "department": null,
+          "missing_fields": [
+            "primary_symptom",
+            "body_part",
+            "duration"
+          ],
+          "strategy": "collect_missing_info"
+        }
+      },
+      {
+        "input": "有点难受",
+        "expected": {
+          "department": null,
+          "missing_fields": [
+            "primary_symptom",
+            "body_part",
+            "duration"
+          ],
+          "strategy": "collect_missing_info"
+        }
+      },
+      {
+        "input": "感觉不太好",
+        "expected": {
+          "department": null,
+          "missing_fields": [
+            "primary_symptom",
+            "body_part",
+            "duration"
+          ],
+          "strategy": "collect_missing_info"
+        }
+      },
+      {
+        "input": "有点难受",
+        "expected": {
+          "department": null,
+          "missing_fields": [
+            "primary_symptom",
+            "body_part",
+            "duration"
+          ],
+          "strategy": "collect_missing_info"
+        }
+      },
+      {
+        "input": "感觉不太好",
+        "expected": {
+          "department": null,
+          "missing_fields": [
+            "primary_symptom",
+            "body_part",
+            "duration"
+          ],
+          "strategy": "collect_missing_info"
+        }
+      },
+      {
+        "input": "感觉不太好",
+        "expected": {
+          "department": null,
+          "missing_fields": [
+            "primary_symptom",
+            "body_part",
+            "duration"
+          ],
+          "strategy": "collect_missing_info"
+        }
+      },
+      {
+        "input": "疼",
+        "expected": {
+          "department": null,
+          "missing_fields": [
+            "body_part",
+            "duration"
+          ],
+          "strategy": "collect_missing_info"
+        }
+      },
+      {
+        "input": "不舒服",
+        "expected": {
+          "department": null,
+          "missing_fields": [
+            "primary_symptom",
+            "body_part",
+            "duration"
+          ],
+          "strategy": "collect_missing_info"
+        }
+      },
+      {
+        "input": "不舒服",
+        "expected": {
+          "department": null,
+          "missing_fields": [
+            "primary_symptom",
+            "body_part",
+            "duration"
+          ],
+          "strategy": "collect_missing_info"
+        }
+      },
+      {
+        "input": "疼",
+        "expected": {
+          "department": null,
+          "missing_fields": [
+            "body_part",
+            "duration"
+          ],
+          "strategy": "collect_missing_info"
+        }
+      },
+      {
+        "input": "有点难受",
+        "expected": {
+          "department": null,
+          "missing_fields": [
+            "primary_symptom",
+            "body_part",
+            "duration"
+          ],
+          "strategy": "collect_missing_info"
+        }
+      },
+      {
+        "input": "疼",
+        "expected": {
+          "department": null,
+          "missing_fields": [
+            "body_part",
+            "duration"
+          ],
+          "strategy": "collect_missing_info"
+        }
+      },
+      {
+        "input": "不舒服",
+        "expected": {
+          "department": null,
+          "missing_fields": [
+            "primary_symptom",
+            "body_part",
+            "duration"
+          ],
+          "strategy": "collect_missing_info"
+        }
+      },
+      {
+        "input": "不舒服",
+        "expected": {
+          "department": null,
+          "missing_fields": [
+            "primary_symptom",
+            "body_part",
+            "duration"
+          ],
+          "strategy": "collect_missing_info"
+        }
+      },
+      {
+        "input": "疼",
+        "expected": {
+          "department": null,
+          "missing_fields": [
+            "body_part",
+            "duration"
+          ],
+          "strategy": "collect_missing_info"
+        }
+      },
+      {
+        "input": "疼",
+        "expected": {
+          "department": null,
+          "missing_fields": [
+            "body_part",
+            "duration"
+          ],
+          "strategy": "collect_missing_info"
+        }
+      },
+      {
+        "input": "疼",
+        "expected": {
+          "department": null,
+          "missing_fields": [
+            "body_part",
+            "duration"
+          ],
+          "strategy": "collect_missing_info"
+        }
+      },
+      {
+        "input": "不舒服",
+        "expected": {
+          "department": null,
+          "missing_fields": [
+            "primary_symptom",
+            "body_part",
+            "duration"
+          ],
+          "strategy": "collect_missing_info"
+        }
+      },
+      {
+        "input": "疼",
+        "expected": {
+          "department": null,
+          "missing_fields": [
+            "body_part",
+            "duration"
+          ],
+          "strategy": "collect_missing_info"
+        }
+      },
+      {
+        "input": "疼",
+        "expected": {
+          "department": null,
+          "missing_fields": [
+            "body_part",
+            "duration"
+          ],
+          "strategy": "collect_missing_info"
+        }
+      },
+      {
+        "input": "有点难受",
+        "expected": {
+          "department": null,
+          "missing_fields": [
+            "primary_symptom",
+            "body_part",
+            "duration"
+          ],
+          "strategy": "collect_missing_info"
+        }
+      },
+      {
+        "input": "疼",
+        "expected": {
+          "department": null,
+          "missing_fields": [
+            "body_part",
+            "duration"
+          ],
+          "strategy": "collect_missing_info"
+        }
+      },
+      {
+        "input": "不舒服",
+        "expected": {
+          "department": null,
+          "missing_fields": [
+            "primary_symptom",
+            "body_part",
+            "duration"
+          ],
+          "strategy": "collect_missing_info"
+        }
+      },
+      {
+        "input": "有点难受",
+        "expected": {
+          "department": null,
+          "missing_fields": [
+            "primary_symptom",
+            "body_part",
+            "duration"
+          ],
+          "strategy": "collect_missing_info"
+        }
+      },
+      {
+        "input": "感觉不太好",
+        "expected": {
+          "department": null,
+          "missing_fields": [
+            "primary_symptom",
+            "body_part",
+            "duration"
+          ],
+          "strategy": "collect_missing_info"
+        }
+      },
+      {
+        "input": "不舒服",
+        "expected": {
+          "department": null,
+          "missing_fields": [
+            "primary_symptom",
+            "body_part",
+            "duration"
+          ],
+          "strategy": "collect_missing_info"
+        }
+      }
+    ],
+    "multi_turn_scenarios": [
+      {
+        "turns": [
+          {
+            "user": "我想挂号",
+            "expected_response": "请问您哪里不舒服?",
+            "expected_state": "COLLECT_INFO"
+          },
+          {
+            "user": "头疼",
+            "expected_response": "请问持续多久了?",
+            "expected_state": "COLLECT_INFO"
+          },
+          {
+            "user": "三天了",
+            "expected_response": "已为您匹配神经内科",
+            "expected_state": "CONFIRM"
+          }
+        ],
+        "expected_final": {
+          "department": "神经内科",
+          "symptom_struct": {
+            "primary_symptom": "头疼",
+            "duration": "1-3天"
+          }
+        }
+      },
+      {
+        "turns": [
+          {
+            "user": "肚子疼",
+            "expected_response": "请问具体哪个部位?",
+            "expected_state": "COLLECT_INFO"
+          },
+          {
+            "user": "右上腹",
+            "expected_response": "请问持续多久了?",
+            "expected_state": "COLLECT_INFO"
+          },
+          {
+            "user": "一周多了",
+            "expected_response": "已为您匹配消化内科",
+            "expected_state": "CONFIRM"
+          }
+        ],
+        "expected_final": {
+          "department": "消化内科",
+          "symptom_struct": {
+            "primary_symptom": "疼痛",
+            "body_part": "右上腹",
+            "duration": "超过1周"
+          }
+        }
+      },
+      {
+        "turns": [
+          {
+            "user": "关节痛",
+            "expected_state": "COLLECT_INFO"
+          },
+          {
+            "user": "1-3天",
+            "expected_state": "CONFIRM"
+          }
+        ],
+        "expected_final": {
+          "symptom_struct": {
+            "primary_symptom": "关节痛",
+            "duration": "1-3天"
+          }
+        }
+      },
+      {
+        "turns": [
+          {
+            "user": "关节痛",
+            "expected_state": "COLLECT_INFO"
+          },
+          {
+            "user": "很久了",
+            "expected_state": "CONFIRM"
+          }
+        ],
+        "expected_final": {
+          "symptom_struct": {
+            "primary_symptom": "关节痛",
+            "duration": "很久了"
+          }
+        }
+      },
+      {
+        "turns": [
+          {
+            "user": "咳嗽",
+            "expected_state": "COLLECT_INFO"
+          },
+          {
+            "user": "很久了",
+            "expected_state": "CONFIRM"
+          }
+        ],
+        "expected_final": {
+          "symptom_struct": {
+            "primary_symptom": "咳嗽",
+            "duration": "很久了"
+          }
+        }
+      },
+      {
+        "turns": [
+          {
+            "user": "腹泻",
+            "expected_state": "COLLECT_INFO"
+          },
+          {
+            "user": "1-3天",
+            "expected_state": "CONFIRM"
+          }
+        ],
+        "expected_final": {
+          "symptom_struct": {
+            "primary_symptom": "腹泻",
+            "duration": "1-3天"
+          }
+        }
+      },
+      {
+        "turns": [
+          {
+            "user": "头晕",
+            "expected_state": "COLLECT_INFO"
+          },
+          {
+            "user": "今天刚开始",
+            "expected_state": "CONFIRM"
+          }
+        ],
+        "expected_final": {
+          "symptom_struct": {
+            "primary_symptom": "头晕",
+            "duration": "今天刚开始"
+          }
+        }
+      },
+      {
+        "turns": [
+          {
+            "user": "腹泻",
+            "expected_state": "COLLECT_INFO"
+          },
+          {
+            "user": "超过1周",
+            "expected_state": "CONFIRM"
+          }
+        ],
+        "expected_final": {
+          "symptom_struct": {
+            "primary_symptom": "腹泻",
+            "duration": "超过1周"
+          }
+        }
+      },
+      {
+        "turns": [
+          {
+            "user": "腹泻",
+            "expected_state": "COLLECT_INFO"
+          },
+          {
+            "user": "很久了",
+            "expected_state": "CONFIRM"
+          }
+        ],
+        "expected_final": {
+          "symptom_struct": {
+            "primary_symptom": "腹泻",
+            "duration": "很久了"
+          }
+        }
+      },
+      {
+        "turns": [
+          {
+            "user": "腹泻",
+            "expected_state": "COLLECT_INFO"
+          },
+          {
+            "user": "今天刚开始",
+            "expected_state": "CONFIRM"
+          }
+        ],
+        "expected_final": {
+          "symptom_struct": {
+            "primary_symptom": "腹泻",
+            "duration": "今天刚开始"
+          }
+        }
+      },
+      {
+        "turns": [
+          {
+            "user": "头晕",
+            "expected_state": "COLLECT_INFO"
+          },
+          {
+            "user": "今天刚开始",
+            "expected_state": "CONFIRM"
+          }
+        ],
+        "expected_final": {
+          "symptom_struct": {
+            "primary_symptom": "头晕",
+            "duration": "今天刚开始"
+          }
+        }
+      },
+      {
+        "turns": [
+          {
+            "user": "腹泻",
+            "expected_state": "COLLECT_INFO"
+          },
+          {
+            "user": "超过1周",
+            "expected_state": "CONFIRM"
+          }
+        ],
+        "expected_final": {
+          "symptom_struct": {
+            "primary_symptom": "腹泻",
+            "duration": "超过1周"
+          }
+        }
+      },
+      {
+        "turns": [
+          {
+            "user": "头晕",
+            "expected_state": "COLLECT_INFO"
+          },
+          {
+            "user": "1-3天",
+            "expected_state": "CONFIRM"
+          }
+        ],
+        "expected_final": {
+          "symptom_struct": {
+            "primary_symptom": "头晕",
+            "duration": "1-3天"
+          }
+        }
+      },
+      {
+        "turns": [
+          {
+            "user": "咳嗽",
+            "expected_state": "COLLECT_INFO"
+          },
+          {
+            "user": "1-3天",
+            "expected_state": "CONFIRM"
+          }
+        ],
+        "expected_final": {
+          "symptom_struct": {
+            "primary_symptom": "咳嗽",
+            "duration": "1-3天"
+          }
+        }
+      },
+      {
+        "turns": [
+          {
+            "user": "关节痛",
+            "expected_state": "COLLECT_INFO"
+          },
+          {
+            "user": "很久了",
+            "expected_state": "CONFIRM"
+          }
+        ],
+        "expected_final": {
+          "symptom_struct": {
+            "primary_symptom": "关节痛",
+            "duration": "很久了"
+          }
+        }
+      },
+      {
+        "turns": [
+          {
+            "user": "咳嗽",
+            "expected_state": "COLLECT_INFO"
+          },
+          {
+            "user": "很久了",
+            "expected_state": "CONFIRM"
+          }
+        ],
+        "expected_final": {
+          "symptom_struct": {
+            "primary_symptom": "咳嗽",
+            "duration": "很久了"
+          }
+        }
+      },
+      {
+        "turns": [
+          {
+            "user": "咳嗽",
+            "expected_state": "COLLECT_INFO"
+          },
+          {
+            "user": "超过1周",
+            "expected_state": "CONFIRM"
+          }
+        ],
+        "expected_final": {
+          "symptom_struct": {
+            "primary_symptom": "咳嗽",
+            "duration": "超过1周"
+          }
+        }
+      },
+      {
+        "turns": [
+          {
+            "user": "腹泻",
+            "expected_state": "COLLECT_INFO"
+          },
+          {
+            "user": "1-3天",
+            "expected_state": "CONFIRM"
+          }
+        ],
+        "expected_final": {
+          "symptom_struct": {
+            "primary_symptom": "腹泻",
+            "duration": "1-3天"
+          }
+        }
+      },
+      {
+        "turns": [
+          {
+            "user": "头晕",
+            "expected_state": "COLLECT_INFO"
+          },
+          {
+            "user": "很久了",
+            "expected_state": "CONFIRM"
+          }
+        ],
+        "expected_final": {
+          "symptom_struct": {
+            "primary_symptom": "头晕",
+            "duration": "很久了"
+          }
+        }
+      },
+      {
+        "turns": [
+          {
+            "user": "关节痛",
+            "expected_state": "COLLECT_INFO"
+          },
+          {
+            "user": "今天刚开始",
+            "expected_state": "CONFIRM"
+          }
+        ],
+        "expected_final": {
+          "symptom_struct": {
+            "primary_symptom": "关节痛",
+            "duration": "今天刚开始"
+          }
+        }
+      },
+      {
+        "turns": [
+          {
+            "user": "头晕",
+            "expected_state": "COLLECT_INFO"
+          },
+          {
+            "user": "今天刚开始",
+            "expected_state": "CONFIRM"
+          }
+        ],
+        "expected_final": {
+          "symptom_struct": {
+            "primary_symptom": "头晕",
+            "duration": "今天刚开始"
+          }
+        }
+      },
+      {
+        "turns": [
+          {
+            "user": "头晕",
+            "expected_state": "COLLECT_INFO"
+          },
+          {
+            "user": "1-3天",
+            "expected_state": "CONFIRM"
+          }
+        ],
+        "expected_final": {
+          "symptom_struct": {
+            "primary_symptom": "头晕",
+            "duration": "1-3天"
+          }
+        }
+      },
+      {
+        "turns": [
+          {
+            "user": "咳嗽",
+            "expected_state": "COLLECT_INFO"
+          },
+          {
+            "user": "很久了",
+            "expected_state": "CONFIRM"
+          }
+        ],
+        "expected_final": {
+          "symptom_struct": {
+            "primary_symptom": "咳嗽",
+            "duration": "很久了"
+          }
+        }
+      },
+      {
+        "turns": [
+          {
+            "user": "腹泻",
+            "expected_state": "COLLECT_INFO"
+          },
+          {
+            "user": "很久了",
+            "expected_state": "CONFIRM"
+          }
+        ],
+        "expected_final": {
+          "symptom_struct": {
+            "primary_symptom": "腹泻",
+            "duration": "很久了"
+          }
+        }
+      },
+      {
+        "turns": [
+          {
+            "user": "咳嗽",
+            "expected_state": "COLLECT_INFO"
+          },
+          {
+            "user": "很久了",
+            "expected_state": "CONFIRM"
+          }
+        ],
+        "expected_final": {
+          "symptom_struct": {
+            "primary_symptom": "咳嗽",
+            "duration": "很久了"
+          }
+        }
+      },
+      {
+        "turns": [
+          {
+            "user": "头晕",
+            "expected_state": "COLLECT_INFO"
+          },
+          {
+            "user": "1-3天",
+            "expected_state": "CONFIRM"
+          }
+        ],
+        "expected_final": {
+          "symptom_struct": {
+            "primary_symptom": "头晕",
+            "duration": "1-3天"
+          }
+        }
+      },
+      {
+        "turns": [
+          {
+            "user": "腹泻",
+            "expected_state": "COLLECT_INFO"
+          },
+          {
+            "user": "今天刚开始",
+            "expected_state": "CONFIRM"
+          }
+        ],
+        "expected_final": {
+          "symptom_struct": {
+            "primary_symptom": "腹泻",
+            "duration": "今天刚开始"
+          }
+        }
+      },
+      {
+        "turns": [
+          {
+            "user": "腹泻",
+            "expected_state": "COLLECT_INFO"
+          },
+          {
+            "user": "超过1周",
+            "expected_state": "CONFIRM"
+          }
+        ],
+        "expected_final": {
+          "symptom_struct": {
+            "primary_symptom": "腹泻",
+            "duration": "超过1周"
+          }
+        }
+      },
+      {
+        "turns": [
+          {
+            "user": "腹泻",
+            "expected_state": "COLLECT_INFO"
+          },
+          {
+            "user": "超过1周",
+            "expected_state": "CONFIRM"
+          }
+        ],
+        "expected_final": {
+          "symptom_struct": {
+            "primary_symptom": "腹泻",
+            "duration": "超过1周"
+          }
+        }
+      },
+      {
+        "turns": [
+          {
+            "user": "腹泻",
+            "expected_state": "COLLECT_INFO"
+          },
+          {
+            "user": "很久了",
+            "expected_state": "CONFIRM"
+          }
+        ],
+        "expected_final": {
+          "symptom_struct": {
+            "primary_symptom": "腹泻",
+            "duration": "很久了"
+          }
+        }
+      },
+      {
+        "turns": [
+          {
+            "user": "咳嗽",
+            "expected_state": "COLLECT_INFO"
+          },
+          {
+            "user": "1-3天",
+            "expected_state": "CONFIRM"
+          }
+        ],
+        "expected_final": {
+          "symptom_struct": {
+            "primary_symptom": "咳嗽",
+            "duration": "1-3天"
+          }
+        }
+      },
+      {
+        "turns": [
+          {
+            "user": "胸闷",
+            "expected_state": "COLLECT_INFO"
+          },
+          {
+            "user": "1-3天",
+            "expected_state": "CONFIRM"
+          }
+        ],
+        "expected_final": {
+          "symptom_struct": {
+            "primary_symptom": "胸闷",
+            "duration": "1-3天"
+          }
+        }
+      },
+      {
+        "turns": [
+          {
+            "user": "头晕",
+            "expected_state": "COLLECT_INFO"
+          },
+          {
+            "user": "今天刚开始",
+            "expected_state": "CONFIRM"
+          }
+        ],
+        "expected_final": {
+          "symptom_struct": {
+            "primary_symptom": "头晕",
+            "duration": "今天刚开始"
+          }
+        }
+      },
+      {
+        "turns": [
+          {
+            "user": "胸闷",
+            "expected_state": "COLLECT_INFO"
+          },
+          {
+            "user": "今天刚开始",
+            "expected_state": "CONFIRM"
+          }
+        ],
+        "expected_final": {
+          "symptom_struct": {
+            "primary_symptom": "胸闷",
+            "duration": "今天刚开始"
+          }
+        }
+      },
+      {
+        "turns": [
+          {
+            "user": "头晕",
+            "expected_state": "COLLECT_INFO"
+          },
+          {
+            "user": "很久了",
+            "expected_state": "CONFIRM"
+          }
+        ],
+        "expected_final": {
+          "symptom_struct": {
+            "primary_symptom": "头晕",
+            "duration": "很久了"
+          }
+        }
+      },
+      {
+        "turns": [
+          {
+            "user": "关节痛",
+            "expected_state": "COLLECT_INFO"
+          },
+          {
+            "user": "1-3天",
+            "expected_state": "CONFIRM"
+          }
+        ],
+        "expected_final": {
+          "symptom_struct": {
+            "primary_symptom": "关节痛",
+            "duration": "1-3天"
+          }
+        }
+      },
+      {
+        "turns": [
+          {
+            "user": "头晕",
+            "expected_state": "COLLECT_INFO"
+          },
+          {
+            "user": "今天刚开始",
+            "expected_state": "CONFIRM"
+          }
+        ],
+        "expected_final": {
+          "symptom_struct": {
+            "primary_symptom": "头晕",
+            "duration": "今天刚开始"
+          }
+        }
+      },
+      {
+        "turns": [
+          {
+            "user": "咳嗽",
+            "expected_state": "COLLECT_INFO"
+          },
+          {
+            "user": "今天刚开始",
+            "expected_state": "CONFIRM"
+          }
+        ],
+        "expected_final": {
+          "symptom_struct": {
+            "primary_symptom": "咳嗽",
+            "duration": "今天刚开始"
+          }
+        }
+      },
+      {
+        "turns": [
+          {
+            "user": "关节痛",
+            "expected_state": "COLLECT_INFO"
+          },
+          {
+            "user": "今天刚开始",
+            "expected_state": "CONFIRM"
+          }
+        ],
+        "expected_final": {
+          "symptom_struct": {
+            "primary_symptom": "关节痛",
+            "duration": "今天刚开始"
+          }
+        }
+      },
+      {
+        "turns": [
+          {
+            "user": "咳嗽",
+            "expected_state": "COLLECT_INFO"
+          },
+          {
+            "user": "很久了",
+            "expected_state": "CONFIRM"
+          }
+        ],
+        "expected_final": {
+          "symptom_struct": {
+            "primary_symptom": "咳嗽",
+            "duration": "很久了"
+          }
+        }
+      },
+      {
+        "turns": [
+          {
+            "user": "头晕",
+            "expected_state": "COLLECT_INFO"
+          },
+          {
+            "user": "1-3天",
+            "expected_state": "CONFIRM"
+          }
+        ],
+        "expected_final": {
+          "symptom_struct": {
+            "primary_symptom": "头晕",
+            "duration": "1-3天"
+          }
+        }
+      },
+      {
+        "turns": [
+          {
+            "user": "关节痛",
+            "expected_state": "COLLECT_INFO"
+          },
+          {
+            "user": "今天刚开始",
+            "expected_state": "CONFIRM"
+          }
+        ],
+        "expected_final": {
+          "symptom_struct": {
+            "primary_symptom": "关节痛",
+            "duration": "今天刚开始"
+          }
+        }
+      },
+      {
+        "turns": [
+          {
+            "user": "关节痛",
+            "expected_state": "COLLECT_INFO"
+          },
+          {
+            "user": "今天刚开始",
+            "expected_state": "CONFIRM"
+          }
+        ],
+        "expected_final": {
+          "symptom_struct": {
+            "primary_symptom": "关节痛",
+            "duration": "今天刚开始"
+          }
+        }
+      },
+      {
+        "turns": [
+          {
+            "user": "腹泻",
+            "expected_state": "COLLECT_INFO"
+          },
+          {
+            "user": "超过1周",
+            "expected_state": "CONFIRM"
+          }
+        ],
+        "expected_final": {
+          "symptom_struct": {
+            "primary_symptom": "腹泻",
+            "duration": "超过1周"
+          }
+        }
+      },
+      {
+        "turns": [
+          {
+            "user": "胸闷",
+            "expected_state": "COLLECT_INFO"
+          },
+          {
+            "user": "1-3天",
+            "expected_state": "CONFIRM"
+          }
+        ],
+        "expected_final": {
+          "symptom_struct": {
+            "primary_symptom": "胸闷",
+            "duration": "1-3天"
+          }
+        }
+      },
+      {
+        "turns": [
+          {
+            "user": "胸闷",
+            "expected_state": "COLLECT_INFO"
+          },
+          {
+            "user": "1-3天",
+            "expected_state": "CONFIRM"
+          }
+        ],
+        "expected_final": {
+          "symptom_struct": {
+            "primary_symptom": "胸闷",
+            "duration": "1-3天"
+          }
+        }
+      },
+      {
+        "turns": [
+          {
+            "user": "胸闷",
+            "expected_state": "COLLECT_INFO"
+          },
+          {
+            "user": "很久了",
+            "expected_state": "CONFIRM"
+          }
+        ],
+        "expected_final": {
+          "symptom_struct": {
+            "primary_symptom": "胸闷",
+            "duration": "很久了"
+          }
+        }
+      },
+      {
+        "turns": [
+          {
+            "user": "咳嗽",
+            "expected_state": "COLLECT_INFO"
+          },
+          {
+            "user": "超过1周",
+            "expected_state": "CONFIRM"
+          }
+        ],
+        "expected_final": {
+          "symptom_struct": {
+            "primary_symptom": "咳嗽",
+            "duration": "超过1周"
+          }
+        }
+      },
+      {
+        "turns": [
+          {
+            "user": "腹泻",
+            "expected_state": "COLLECT_INFO"
+          },
+          {
+            "user": "超过1周",
+            "expected_state": "CONFIRM"
+          }
+        ],
+        "expected_final": {
+          "symptom_struct": {
+            "primary_symptom": "腹泻",
+            "duration": "超过1周"
+          }
+        }
+      },
+      {
+        "turns": [
+          {
+            "user": "头晕",
+            "expected_state": "COLLECT_INFO"
+          },
+          {
+            "user": "今天刚开始",
+            "expected_state": "CONFIRM"
+          }
+        ],
+        "expected_final": {
+          "symptom_struct": {
+            "primary_symptom": "头晕",
+            "duration": "今天刚开始"
+          }
+        }
+      }
+    ],
+    "edge_cases": [
+      {
+        "input": "我要换科室",
+        "context": {
+          "current_department": "神经内科"
+        },
+        "expected": {
+          "intent": "change_department",
+          "strategy": "collect_department"
+        }
+      },
+      {
+        "input": "重新描述",
+        "expected": {
+          "intent": "reset",
+          "strategy": "reset_session",
+          "expected_state": "COLLECT_INFO"
+        }
+      },
+      {
+        "input": "快点,我很痛",
+        "expected": {
+          "intent": "urgent_registration",
+          "strategy": "skip_soft_questions",
+          "urgency": true
+        }
+      },
+      {
+        "input": "不要这个科室,换一个",
+        "context": {
+          "current_department": "消化内科"
+        },
+        "expected": {
+          "intent": "change_department",
+          "strategy": "collect_department"
+        }
+      },
+      {
+        "input": "明天可以吗",
+        "expected": {
+          "intent": "change_date",
+          "strategy": "handle_edge_case"
+        }
+      },
+      {
+        "input": "有没有下午的",
+        "expected": {
+          "intent": "specify_period",
+          "strategy": "handle_edge_case"
+        }
+      },
+      {
+        "input": "有没有下午的",
+        "expected": {
+          "intent": "specify_period",
+          "strategy": "handle_edge_case"
+        }
+      },
+      {
+        "input": "取消挂号",
+        "expected": {
+          "intent": "cancel",
+          "strategy": "handle_edge_case"
+        }
+      },
+      {
+        "input": "取消挂号",
+        "expected": {
+          "intent": "cancel",
+          "strategy": "handle_edge_case"
+        }
+      },
+      {
+        "input": "有没有下午的",
+        "expected": {
+          "intent": "specify_period",
+          "strategy": "handle_edge_case"
+        }
+      },
+      {
+        "input": "我不想挂了",
+        "expected": {
+          "intent": "cancel",
+          "strategy": "handle_edge_case"
+        }
+      },
+      {
+        "input": "有没有下午的",
+        "expected": {
+          "intent": "specify_period",
+          "strategy": "handle_edge_case"
+        }
+      },
+      {
+        "input": "换个时间",
+        "expected": {
+          "intent": "change_time",
+          "strategy": "handle_edge_case"
+        }
+      },
+      {
+        "input": "我不想挂了",
+        "expected": {
+          "intent": "cancel",
+          "strategy": "handle_edge_case"
+        }
+      },
+      {
+        "input": "换个时间",
+        "expected": {
+          "intent": "change_time",
+          "strategy": "handle_edge_case"
+        }
+      },
+      {
+        "input": "取消挂号",
+        "expected": {
+          "intent": "cancel",
+          "strategy": "handle_edge_case"
+        }
+      },
+      {
+        "input": "我不想挂了",
+        "expected": {
+          "intent": "cancel",
+          "strategy": "handle_edge_case"
+        }
+      },
+      {
+        "input": "换个时间",
+        "expected": {
+          "intent": "change_time",
+          "strategy": "handle_edge_case"
+        }
+      },
+      {
+        "input": "换个时间",
+        "expected": {
+          "intent": "change_time",
+          "strategy": "handle_edge_case"
+        }
+      },
+      {
+        "input": "我不想挂了",
+        "expected": {
+          "intent": "cancel",
+          "strategy": "handle_edge_case"
+        }
+      },
+      {
+        "input": "明天可以吗",
+        "expected": {
+          "intent": "change_date",
+          "strategy": "handle_edge_case"
+        }
+      },
+      {
+        "input": "有没有下午的",
+        "expected": {
+          "intent": "specify_period",
+          "strategy": "handle_edge_case"
+        }
+      },
+      {
+        "input": "换个时间",
+        "expected": {
+          "intent": "change_time",
+          "strategy": "handle_edge_case"
+        }
+      },
+      {
+        "input": "有没有下午的",
+        "expected": {
+          "intent": "specify_period",
+          "strategy": "handle_edge_case"
+        }
+      },
+      {
+        "input": "有没有下午的",
+        "expected": {
+          "intent": "specify_period",
+          "strategy": "handle_edge_case"
+        }
+      },
+      {
+        "input": "取消挂号",
+        "expected": {
+          "intent": "cancel",
+          "strategy": "handle_edge_case"
+        }
+      },
+      {
+        "input": "有没有下午的",
+        "expected": {
+          "intent": "specify_period",
+          "strategy": "handle_edge_case"
+        }
+      },
+      {
+        "input": "换个时间",
+        "expected": {
+          "intent": "change_time",
+          "strategy": "handle_edge_case"
+        }
+      },
+      {
+        "input": "取消挂号",
+        "expected": {
+          "intent": "cancel",
+          "strategy": "handle_edge_case"
+        }
+      },
+      {
+        "input": "我不想挂了",
+        "expected": {
+          "intent": "cancel",
+          "strategy": "handle_edge_case"
+        }
+      },
+      {
+        "input": "换个时间",
+        "expected": {
+          "intent": "change_time",
+          "strategy": "handle_edge_case"
+        }
+      },
+      {
+        "input": "取消挂号",
+        "expected": {
+          "intent": "cancel",
+          "strategy": "handle_edge_case"
+        }
+      },
+      {
+        "input": "取消挂号",
+        "expected": {
+          "intent": "cancel",
+          "strategy": "handle_edge_case"
+        }
+      },
+      {
+        "input": "有没有下午的",
+        "expected": {
+          "intent": "specify_period",
+          "strategy": "handle_edge_case"
+        }
+      },
+      {
+        "input": "我不想挂了",
+        "expected": {
+          "intent": "cancel",
+          "strategy": "handle_edge_case"
+        }
+      },
+      {
+        "input": "换个时间",
+        "expected": {
+          "intent": "change_time",
+          "strategy": "handle_edge_case"
+        }
+      },
+      {
+        "input": "换个时间",
+        "expected": {
+          "intent": "change_time",
+          "strategy": "handle_edge_case"
+        }
+      },
+      {
+        "input": "有没有下午的",
+        "expected": {
+          "intent": "specify_period",
+          "strategy": "handle_edge_case"
+        }
+      },
+      {
+        "input": "我不想挂了",
+        "expected": {
+          "intent": "cancel",
+          "strategy": "handle_edge_case"
+        }
+      },
+      {
+        "input": "换个时间",
+        "expected": {
+          "intent": "change_time",
+          "strategy": "handle_edge_case"
+        }
+      },
+      {
+        "input": "我不想挂了",
+        "expected": {
+          "intent": "cancel",
+          "strategy": "handle_edge_case"
+        }
+      },
+      {
+        "input": "换个时间",
+        "expected": {
+          "intent": "change_time",
+          "strategy": "handle_edge_case"
+        }
+      },
+      {
+        "input": "有没有下午的",
+        "expected": {
+          "intent": "specify_period",
+          "strategy": "handle_edge_case"
+        }
+      },
+      {
+        "input": "明天可以吗",
+        "expected": {
+          "intent": "change_date",
+          "strategy": "handle_edge_case"
+        }
+      },
+      {
+        "input": "换个时间",
+        "expected": {
+          "intent": "change_time",
+          "strategy": "handle_edge_case"
+        }
+      },
+      {
+        "input": "取消挂号",
+        "expected": {
+          "intent": "cancel",
+          "strategy": "handle_edge_case"
+        }
+      },
+      {
+        "input": "取消挂号",
+        "expected": {
+          "intent": "cancel",
+          "strategy": "handle_edge_case"
+        }
+      },
+      {
+        "input": "明天可以吗",
+        "expected": {
+          "intent": "change_date",
+          "strategy": "handle_edge_case"
+        }
+      },
+      {
+        "input": "换个时间",
+        "expected": {
+          "intent": "change_time",
+          "strategy": "handle_edge_case"
+        }
+      },
+      {
+        "input": "取消挂号",
+        "expected": {
+          "intent": "cancel",
+          "strategy": "handle_edge_case"
+        }
+      }
+    ]
+  }
+}
