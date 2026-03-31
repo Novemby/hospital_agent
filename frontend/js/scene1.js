@@ -17,8 +17,7 @@ const app = createApp({
         const isRecordingVoice = ref(false);
         const voiceText = ref('');
         const recognizedText = ref('');
-        let mediaRecorder = null;
-        let audioChunks = [];
+        let recognition = null;
 
         // 聊天消息列表（用于展示发送的消息）
         const chatMessages = ref([]);
@@ -48,6 +47,9 @@ const app = createApp({
         // 沉浸式助手状态
         const assistantPhase = ref('WELCOME');  // WELCOME | LISTENING | THINKING | REPLY | SUCCESS
         const assistantDisplayText = ref('');
+
+        const showHumanPanel = ref(false);   // 控制人工导诊台框显示
+        const showCallButton = ref(true);    // 控制“呼叫人工”按钮显示
 
         // 手语 agent
         const agent = new SignLanguageAgent({
@@ -202,6 +204,18 @@ const app = createApp({
             const p = getPatientById(currentId.value);
             return p ? p.name : '';
         });
+
+        // 播放音效并展开人工帮助侧边栏
+        const callHumanService = () => {
+            try {
+                const audio = new Audio('/assets/sounds/ding.mp3');
+                audio.play().catch(e => console.warn('音效播放失败:', e));
+            } catch (e) {
+                console.warn('创建 Audio 对象失败:', e);
+            }
+            showHumanPanel.value = true;
+            showCallButton.value = false;
+        };
 
         const goToRoleSelect = () => {
             window.location.href = 'index.html';
@@ -509,13 +523,13 @@ const app = createApp({
             if (agent.isRecording) {
                 agent.stopRecording();
                 const btn = document.getElementById('recordBtn');
-                btn.textContent = '⏺ 开始识别';
-                btn.classList.remove('btn-recording');
+                if (btn) btn.textContent = '⏺ 开始识别';
+                if (btn) btn.classList.remove('btn-recording');
             } else {
                 agent.startRecording();
                 const btn = document.getElementById('recordBtn');
-                btn.textContent = '⏹ 停止';
-                btn.classList.add('btn-recording');
+                if (btn) btn.textContent = '⏹ 停止';
+                if (btn) btn.classList.add('btn-recording');
             }
         };
 
@@ -553,65 +567,81 @@ const app = createApp({
             }
         };
 
-        const startVoiceRecording = async () => {
-            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-                alert('您的浏览器不支持语音输入');
+        const startVoiceRecording = () => {
+            // 检查浏览器支持
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            if (!SpeechRecognition) {
+                alert('您的浏览器不支持实时语音识别，请使用 Chrome、Edge 或 Safari');
                 return;
             }
+
             try {
-                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                mediaRecorder = new MediaRecorder(stream);
-                audioChunks = [];
-                mediaRecorder.ondataavailable = event => {
-                    audioChunks.push(event.data);
+                recognition = new SpeechRecognition();
+                recognition.lang = 'zh-CN'; // 设置为中文
+                recognition.continuous = true; // 连续识别
+                recognition.interimResults = true; // 返回临时结果
+
+                // 实时识别结果
+                recognition.onresult = (event) => {
+                    let interimTranscript = '';
+                    let finalTranscript = '';
+
+                    for (let i = event.resultIndex; i < event.results.length; i++) {
+                        const transcript = event.results[i][0].transcript;
+                        if (event.results[i].isFinal) {
+                            finalTranscript += transcript;
+                        } else {
+                            interimTranscript += transcript;
+                        }
+                    }
+
+                    // 实时更新识别文本（临时结果）
+                    if (interimTranscript) {
+                        recognizedText.value = interimTranscript;
+                    }
+
+                    // 确认的结果追加到输入框
+                    if (finalTranscript) {
+                        voiceText.value += finalTranscript;
+                        recognizedText.value = ''; // 清空临时结果
+                    }
                 };
-                mediaRecorder.onstop = () => {
-                    const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
-                    sendVoiceToBackend(audioBlob);
-                    stream.getTracks().forEach(track => track.stop());
+
+                recognition.onerror = (event) => {
+                    console.error('语音识别错误:', event.error);
+                    if (event.error === 'no-speech') {
+                        // 没有检测到语音，不提示错误
+                        return;
+                    }
+                    alert('语音识别出错: ' + event.error);
+                    stopVoiceRecording();
                 };
-                mediaRecorder.start();
+
+                recognition.onend = () => {
+                    // 如果还在录音状态，自动重启（保持连续识别）
+                    if (isRecordingVoice.value) {
+                        try {
+                            recognition.start();
+                        } catch (e) {
+                            console.warn('重启识别失败:', e);
+                        }
+                    }
+                };
+
+                recognition.start();
                 isRecordingVoice.value = true;
             } catch (error) {
-                alert('无法访问麦克风: ' + error.message);
+                alert('启动语音识别失败: ' + error.message);
             }
         };
 
         const stopVoiceRecording = () => {
-            if (mediaRecorder && isRecordingVoice.value) {
-                mediaRecorder.stop();
+            if (recognition && isRecordingVoice.value) {
                 isRecordingVoice.value = false;
+                recognition.stop();
+                recognition = null;
+                recognizedText.value = ''; // 清空临时识别结果
             }
-        };
-
-        const sendVoiceToBackend = async (audioBlob) => {
-            const formData = new FormData();
-            formData.append('audio', audioBlob);
-            try {
-                const response = await fetch('http://localhost:8000/speech-to-text', {
-                    method: 'POST',
-                    body: formData
-                });
-                const result = await response.json();
-                if (result.success) {
-                    recognizedText.value = result.text;
-                } else {
-                    alert('语音识别失败');
-                }
-            } catch (error) {
-                alert('语音识别服务连接失败');
-            }
-        };
-
-        const confirmVoiceText = () => {
-            if (recognizedText.value.trim()) {
-                voiceText.value = recognizedText.value;
-                recognizedText.value = '';
-            }
-        };
-
-        const cancelVoiceText = () => {
-            recognizedText.value = '';
         };
 
         watch(view, (newVal) => {
@@ -643,9 +673,12 @@ const app = createApp({
             startCamera, startContinuousRecognition, toggleRecording, cameraStarted, recordDisabled,
             currentWord, currentConfidence, statusText, overlayText, overlayClass,
             clearSequence, polishSequence, sendPatientMessage,
-            toggleVoiceRecording, confirmVoiceText, cancelVoiceText,
+            toggleVoiceRecording, startVoiceRecording, stopVoiceRecording,
             continuousActive, continuousWords, toggleContinuous, clearSignInput,
-            assistantPhase, assistantDisplayText
+            assistantPhase, assistantDisplayText,
+            showHumanPanel,
+            showCallButton,
+            callHumanService  // 新增
         };
     },
     template: `
@@ -890,7 +923,7 @@ const app = createApp({
                                         </div>
                                     </div>
 
-                                    <!-- 底部：识别结果 + 输入框 + 确认发送 -->
+                                    <!-- 底部：识别结果 + 输入框 + 确认发送 + 呼叫人工 -->
                                     <div class="shrink-0 space-y-2">
                                         <div class="flex items-center justify-between">
                                             <h3 class="font-medium text-sm text-gray-600">📝 手语识别结果</h3>
@@ -906,12 +939,18 @@ const app = createApp({
                                         </div>
                                     </div>
                                 </div>
+                                
+                                <!-- 独立的“呼叫人工”按钮（初始显示） -->
+                                <button v-if="showCallButton" @click="callHumanService"
+                                        class="w-full bg-orange-500 hover:bg-orange-600 text-white font-bold py-3 rounded-xl text-lg transition-colors flex items-center justify-center gap-2 shadow-md">
+                                    📞 呼叫人工
+                                </button>
 
-                                <!-- 人工帮助侧边栏 -->
-                                <div class="bg-white rounded-2xl shadow-sm p-4 transition-all duration-300">
+                                <!-- 人工导诊台框（初始隐藏，点击按钮后显示） -->
+                                <div v-if="showHumanPanel" class="bg-white rounded-2xl shadow-sm p-4 transition-all duration-300">
                                     <div class="flex justify-between items-center cursor-pointer" @click="showChat = !showChat">
                                         <h3 class="font-bold text-lg flex items-center gap-2">
-                                            <span class="text-xl">📞</span> 呼叫人工导诊台
+                                            <span class="text-xl">📞</span> 人工导诊台
                                         </h3>
                                         <button class="text-blue-600 text-sm hover:underline">
                                             {{ showChat ? '收起 ▲' : '展开 ▼' }}
@@ -929,10 +968,26 @@ const app = createApp({
                                                 人工座席在线，如 AI 无法解决您的问题，请在此沟通
                                             </div>
                                         </div>
-
-                                        <input v-model="voiceText" type="text" placeholder="输入求助信息..." class="w-full border rounded-lg p-2 mb-2 text-sm outline-none focus:border-blue-400">
-                                        <div class="flex justify-end">
-                                            <button @click="sendPatientMessage(voiceText)" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 text-sm">
+                            
+                                        <!-- 实时识别提示 -->
+                                        <div v-if="recognizedText" class="mb-3 p-2 bg-blue-50 border border-blue-200 rounded-lg">
+                                            <div class="text-xs text-blue-600 mb-1 font-medium flex items-center gap-1">
+                                                <span class="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></span>
+                                                正在识别...
+                                            </div>
+                                            <div class="text-gray-800 text-sm">{{ recognizedText }}</div>
+                                        </div>
+                            
+                                        <input v-model="voiceText" type="text" placeholder="输入交互信息或点击语音输入..." class="w-full border rounded-lg p-2 mb-2 text-sm outline-none focus:border-blue-400">
+                                        <div class="flex justify-between gap-2">
+                                            <button @click="isRecordingVoice ? stopVoiceRecording() : startVoiceRecording()"
+                                                    :class="isRecordingVoice ? 'bg-red-500 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'"
+                                                    class="px-3 py-2 rounded-lg text-sm flex items-center gap-1 font-medium transition-colors">
+                                                <span v-if="!isRecordingVoice">🎤 实时语音</span>
+                                                <span v-else>⏹ 停止</span>
+                                                <span v-if="isRecordingVoice" class="w-2 h-2 rounded-full bg-white animate-ping ml-1"></span>
+                                            </button>
+                                            <button @click="sendPatientMessage(voiceText)" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 text-sm flex-1">
                                                 发送消息
                                             </button>
                                         </div>
