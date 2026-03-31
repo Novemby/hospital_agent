@@ -34,8 +34,8 @@ _load_local_env()
 
 class Settings:
     # 百度语音识别配置
-    BAIDU_API_KEY: str = os.getenv("BAIDU_API_KEY", "lwUYmBdFPhZxU7ESNir7mF75")
-    BAIDU_SECRET_KEY: str = os.getenv("BAIDU_SECRET_KEY", "Ny4uiiKwbr1k21yt2iM0SFz6hWo0hwId")
+    BAIDU_API_KEY: str = os.getenv("BAIDU_API_KEY", "")
+    BAIDU_SECRET_KEY: str = os.getenv("BAIDU_SECRET_KEY", "")
     BAIDU_TOKEN_URL: str = "https://aip.baidubce.com/oauth/2.0/token"
     BAIDU_SPEECH_URL: str = "https://vop.baidu.com/server_api"
 
