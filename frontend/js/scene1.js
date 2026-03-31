@@ -41,6 +41,14 @@ const app = createApp({
         const agentOptions = ref([]);
         const agentLoading = ref(false);
 
+        // 连续识别状态
+        const continuousActive = ref(false);
+        const continuousWords = ref([]);  // 当前句子已识别的词
+
+        // 沉浸式助手状态
+        const assistantPhase = ref('WELCOME');  // WELCOME | LISTENING | THINKING | REPLY | SUCCESS
+        const assistantDisplayText = ref('');
+
         // 手语 agent
         const agent = new SignLanguageAgent({
             apiUrl: 'http://localhost:8000',
@@ -55,21 +63,43 @@ const app = createApp({
                     currentCandidates.value = [];
                 }
             },
+            onWordRecognized: (word, confidence) => {
+                // 连续识别：将词汇追加到输入框
+                continuousWords.value.push(word);
+                const current = agentInputText.value.trim();
+                agentInputText.value = current ? `${current} ${word}` : word;
+                statusText.value = `✅ 识别到「${word}」(${(confidence * 100).toFixed(0)}%)`;
+                overlayText.value = `✓ ${word}`;
+                overlayClass.value = 'overlay result';
+                assistantPhase.value = 'LISTENING';
+            },
+            onSentenceComplete: (words) => {
+                // 句子结束：只提示用户确认，不自动发送
+                statusText.value = '✅ 识别完成，请确认后发送';
+                overlayText.value = '等待确认';
+                overlayClass.value = 'overlay';
+            },
             onSequenceUpdate: (seq) => {
                 vueWordSequence.value = seq;
             },
             onStatusChange: (status, data) => {
                 if (status === 'recordingStart') {
-                    statusText.value = '我在看着，请比划...';
+                    statusText.value = continuousActive.value ? '检测到手势，识别中...' : '我在看着，请比划...';
                     overlayText.value = '录制中...';
                     overlayClass.value = 'overlay recording';
                 } else if (status === 'sending') {
                     statusText.value = `正在理解... (${data.frameCount}帧)`;
                     overlayText.value = `处理 ${data.frameCount} 帧...`;
                 } else if (status === 'resultReady') {
-                    statusText.value = '请点头确认，或摇头切换候选词';
-                    overlayText.value = data.prediction;
-                    startHeadGestureWaiting();
+                    if (!continuousActive.value) {
+                        statusText.value = '请点头确认，或摇头切换候选词';
+                        overlayText.value = data.prediction;
+                        startHeadGestureWaiting();
+                    }
+                } else if (status === 'continuousReady') {
+                    statusText.value = '🟢 连续识别中，请比划手语...';
+                    overlayText.value = '等待手势';
+                    overlayClass.value = 'overlay';
                 } else if (status === 'tooShort') {
                     statusText.value = '时间有点短，请再比划一次 😊';
                 } else if (status === 'recognitionFailed') {
@@ -326,8 +356,8 @@ const app = createApp({
             if (!content || !currentId.value) return;
 
             agentMessages.value.push({ role: 'user', content });
-            scrollToBottom();
             agentLoading.value = true;
+            assistantPhase.value = 'THINKING';
 
             try {
                 const response = await fetch('http://localhost:8000/api/agent/register/chat', {
@@ -347,6 +377,8 @@ const app = createApp({
                 agentOptions.value = Array.isArray(data.options) ? data.options : [];
                 agentState.value = data.state || agentState.value;
                 agentMessages.value.push({ role: 'assistant', content: agentReply.value });
+                assistantDisplayText.value = agentReply.value;
+                assistantPhase.value = data.state === 'SUCCESS' ? 'SUCCESS' : 'REPLY';
 
                 // 🌟 解析并渲染后端传来的结构化症状
                 if (data?.slots?.triage_symptoms) {
@@ -378,7 +410,8 @@ const app = createApp({
                 const errMsg = `请求失败：${error.message || '网络异常'}`;
                 agentReply.value = errMsg;
                 agentMessages.value.push({ role: 'assistant', content: errMsg });
-                scrollToBottom();
+                assistantDisplayText.value = errMsg;
+                assistantPhase.value = 'REPLY';
             } finally {
                 agentLoading.value = false;
                 agentInputText.value = '';
@@ -414,9 +447,17 @@ const app = createApp({
             // 初始化清空上一次的状态
             parsedSymptoms.value = {};
             agentState.value = 'INIT';
+            assistantPhase.value = 'WELCOME';
+            assistantDisplayText.value = '';
         };
 
         const goBack = () => {
+            if (continuousActive.value) {
+                agent.stopContinuous();
+                continuousActive.value = false;
+            }
+            agent.stopCamera();
+            cameraStarted.value = false;
             view.value = 'reg-home';
         };
 
@@ -425,12 +466,42 @@ const app = createApp({
                 await agent.startCamera('webcam', 'canvas');
                 cameraStarted.value = true;
                 recordDisabled.value = false;
-                statusText.value = '就绪，可以开始比划了';
-                overlayText.value = '准备就绪';
+                continuousActive.value = false;
+                statusText.value = '摄像头已就绪，点击"开始识别"';
+                overlayText.value = '等待开始';
                 overlayClass.value = 'overlay';
             } catch (error) {
                 alert('摄像头启动失败: ' + error.message);
             }
+        };
+
+        const startContinuousRecognition = () => {
+            agent.startContinuous();
+            continuousActive.value = true;
+            assistantPhase.value = 'LISTENING';
+            statusText.value = '🟢 识别中，请比划手语...';
+            overlayText.value = '等待手势';
+            overlayClass.value = 'overlay';
+        };
+
+        const toggleContinuous = () => {
+            if (continuousActive.value) {
+                agent.stopContinuous();
+                agent.clearSentenceBuffer();
+                continuousActive.value = false;
+                statusText.value = '连续识别已暂停';
+            } else {
+                agent.startContinuous();
+                continuousActive.value = true;
+                assistantPhase.value = 'LISTENING';
+                statusText.value = '🟢 连续识别已启动，请比划手语...';
+            }
+        };
+
+        const clearSignInput = () => {
+            agentInputText.value = '';
+            continuousWords.value = [];
+            agent.clearSentenceBuffer();
         };
 
         const toggleRecording = () => {
@@ -544,15 +615,15 @@ const app = createApp({
 
         watch(view, (newVal) => {
             if (newVal === 'sign-triage') {
-                setTimeout(() => {
-                    if (!cameraStarted.value) {
-                        startCamera().catch(e => console.warn('摄像头启动失败', e));
-                    }
-                }, 300);
+                assistantPhase.value = 'WELCOME';
+                assistantDisplayText.value = '';
             }
         });
 
         onUnmounted(() => {
+            if (continuousActive.value) {
+                agent.stopContinuous();
+            }
             agent.stopCamera();
             clearHeadGestureTimer();
         });
@@ -568,10 +639,12 @@ const app = createApp({
             quickAppointment, closeAppointmentModal, loadSlotOptions, submitAppointment,
             sendAgentInput, clickOption, sendToAgent, startScanning,
             quickTakeNumber, quickPayment, goToSignTriage, goBack,
-            startCamera, toggleRecording, cameraStarted, recordDisabled,
+            startCamera, startContinuousRecognition, toggleRecording, cameraStarted, recordDisabled,
             currentWord, currentConfidence, statusText, overlayText, overlayClass,
             clearSequence, polishSequence, sendPatientMessage,
-            toggleVoiceRecording, confirmVoiceText, cancelVoiceText
+            toggleVoiceRecording, confirmVoiceText, cancelVoiceText,
+            continuousActive, continuousWords, toggleContinuous, clearSignInput,
+            assistantPhase, assistantDisplayText
         };
     },
     template: `
@@ -717,15 +790,16 @@ const app = createApp({
                                     </div>
                                 </div>
                                 <div class="controls flex gap-2 mt-4">
-                                    <button id="startBtn" class="flex-1 bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50" :disabled="cameraStarted" @click="startCamera">📷 开启摄像头</button>
-                                    <button id="recordBtn" class="flex-1 bg-green-600 text-white py-2 rounded-lg hover:bg-green-700 disabled:opacity-50" :disabled="!cameraStarted" @click="toggleRecording">⏺ 开始识别</button>
+                                    <button v-if="!cameraStarted" id="startBtn" class="flex-1 bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700" @click="startCamera">📷 开启摄像头</button>
+                                    <button v-else-if="!continuousActive" class="flex-1 bg-green-600 text-white py-2 rounded-lg hover:bg-green-700" @click="startContinuousRecognition">🤟 开始识别</button>
+                                    <button v-else class="flex-1 bg-orange-500 text-white py-2 rounded-lg hover:bg-orange-600" @click="toggleContinuous">⏸ 暂停</button>
                                 </div>
-                                <div class="status-bar flex items-center gap-2 mt-3 p-2 bg-gray-100 rounded-lg text-sm">
-                                    <span class="status-dot" :class="{'active': cameraStarted}" id="statusDot"></span>
+                                <div class="status-bar flex items-center gap-2 mt-3 p-2 rounded-lg text-sm" :class="continuousActive ? 'bg-green-50 border border-green-200' : 'bg-gray-100'">
+                                    <span class="status-dot" :class="{'active': cameraStarted && continuousActive}" id="statusDot"></span>
                                     <span id="statusText">{{ statusText }}</span>
                                 </div>
                                 <div class="tips-box mt-3 p-3 bg-blue-50 rounded-lg text-xs text-gray-600">
-                                    <strong>💡 小贴士：</strong> 光线充足、手部在胸前比划效果更好。识别后请面对摄像头做点头或摇头动作。
+                                    <strong>💡 使用方式：</strong> 开启摄像头后点击"开始识别"，识别到的词汇会出现在右侧，确认无误后点击"确认发送"。
                                 </div>
 
                                 <!-- 🌟 优化一：实时症状感知卡片（消除虚无感） -->
@@ -762,9 +836,8 @@ const app = createApp({
                                 <div class="bg-white rounded-2xl shadow-sm p-4 border border-blue-100 space-y-4 flex flex-col h-[650px]">
                                     <h2 class="text-lg font-bold flex items-center gap-2 shrink-0">🤖 AI 挂号助手</h2>
 
-                                    <!-- 🌟 优化二：状态机驱动的动态进度条 -->
+                                    <!-- 进度条 -->
                                     <div class="bg-slate-50 rounded-xl p-3 shrink-0">
-                                        <div class="text-xs text-gray-500 mb-2">任务流转状态</div>
                                         <div class="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs text-center">
                                             <div class="px-2 py-1.5 rounded-lg font-medium transition-colors" :class="['INIT', 'COLLECT_INFO', 'QUERY_SLOTS', 'CONFIRM', 'SUCCESS'].includes(agentState) ? 'bg-green-100 text-green-700' : 'bg-white border text-gray-400'">1. 症状采录</div>
                                             <div class="px-2 py-1.5 rounded-lg font-medium transition-colors" :class="['QUERY_SLOTS', 'CONFIRM', 'SUCCESS'].includes(agentState) ? 'bg-green-100 text-green-700' : 'bg-white border text-gray-400'">2. 智能分诊</div>
@@ -773,57 +846,63 @@ const app = createApp({
                                         </div>
                                     </div>
 
-                                    <!-- 对话显示与互动区 -->
-                                    <div class="bg-orange-50 rounded-xl p-4 flex flex-col flex-1 overflow-hidden">
-                                        <div class="text-sm text-gray-600 flex items-center justify-between shrink-0 mb-3">
-                                            <span>🤖 导诊助手（状态：{{ agentState }}）</span>
-                                            <span class="text-xs" v-if="agentLoading">理解中...</span>
+                                    <!-- 沉浸式助手状态区 -->
+                                    <div class="assistant-display flex-1 flex flex-col items-center justify-center rounded-2xl p-6 text-center transition-all" :class="'phase-' + assistantPhase.toLowerCase()">
+                                        <!-- WELCOME -->
+                                        <div v-if="assistantPhase === 'WELCOME'" class="space-y-3">
+                                            <div class="text-5xl">🏥</div>
+                                            <div class="text-2xl font-bold text-gray-800">请描述您的症状</div>
+                                            <div class="text-gray-500 text-sm">比划手语，或直接打字告诉我</div>
                                         </div>
-
-                                        <!-- 🌟 优化四：自动滚动的聊天气泡区 -->
-                                        <div ref="chatContainer" class="flex-1 overflow-y-auto space-y-3 mb-3 pr-2 scrollbar-thin">
-                                            <div v-for="(msg, i) in agentMessages" :key="i" class="flex w-full" :class="msg.role === 'user' ? 'justify-end' : 'justify-start'">
-                                                <div v-if="msg.role === 'assistant'" class="bg-white rounded-2xl rounded-tl-sm p-3 text-gray-800 shadow-sm max-w-[85%] text-sm leading-relaxed border border-orange-100">
-                                                    {{ msg.content }}
-                                                </div>
-                                                <div v-else class="bg-blue-600 text-white rounded-2xl rounded-tr-sm p-3 shadow-sm max-w-[85%] text-sm leading-relaxed">
-                                                    {{ msg.content }}
-                                                </div>
+                                        <!-- LISTENING -->
+                                        <div v-else-if="assistantPhase === 'LISTENING'" class="space-y-3">
+                                            <div class="text-5xl">👂</div>
+                                            <div class="text-xl font-bold text-green-700">我在看，请继续比划...</div>
+                                            <div v-if="continuousWords.length > 0" class="flex flex-wrap gap-2 justify-center mt-2">
+                                                <span v-for="(w, i) in continuousWords" :key="i" class="bg-green-100 text-green-800 px-3 py-1 rounded-full text-sm font-medium">{{ w }}</span>
                                             </div>
                                         </div>
-
-                                        <!-- 🌟 优化三：降噪处理的选项区域，防止 18 个科室撑爆屏幕 -->
-                                        <div class="flex flex-wrap gap-2 mb-3 max-h-32 overflow-y-auto shrink-0 scrollbar-thin" v-if="agentOptions && agentOptions.length && agentState !== 'SUCCESS'">
-                                            <button
-                                                v-for="(op, idx) in agentOptions"
-                                                :key="idx"
-                                                @click="clickOption(op)"
-                                                class="px-4 py-1.5 rounded-full border border-blue-300 text-blue-700 bg-white hover:bg-blue-50 hover:border-blue-500 transition-colors text-sm shadow-sm"
-                                            >
-                                                {{ typeof op === 'string' ? op : (op.period || op.department || op.doctor_name || '确认') }}
-                                            </button>
+                                        <!-- THINKING -->
+                                        <div v-else-if="assistantPhase === 'THINKING'" class="space-y-3">
+                                            <div class="text-5xl">🤔</div>
+                                            <div class="text-xl font-bold text-blue-700">正在分析您的症状...</div>
+                                            <div class="thinking-dots flex gap-2 justify-center mt-2">
+                                                <span></span><span></span><span></span>
+                                            </div>
                                         </div>
-
-                                        <div class="flex gap-2 shrink-0">
-                                            <input v-model="agentInputText" @keyup.enter="sendAgentInput" placeholder="直接打字描述..." class="flex-1 border-0 shadow-inner rounded-xl px-4 py-2 text-sm focus:ring-2 focus:ring-orange-300 outline-none" />
-                                            <button @click="sendAgentInput" class="bg-blue-600 text-white px-4 py-2 rounded-xl text-sm hover:bg-blue-700 font-medium">发送</button>
+                                        <!-- REPLY -->
+                                        <div v-else-if="assistantPhase === 'REPLY'" class="space-y-3 w-full">
+                                            <div class="text-4xl">🤖</div>
+                                            <div class="text-base text-gray-800 leading-relaxed bg-white rounded-2xl p-4 shadow-sm border border-orange-100 text-left">"{{ assistantDisplayText }}"</div>
+                                            <!-- 选项按钮 -->
+                                            <div class="flex flex-wrap gap-2 justify-center mt-2" v-if="agentOptions && agentOptions.length && agentState !== 'SUCCESS'">
+                                                <button v-for="(op, idx) in agentOptions" :key="idx" @click="clickOption(op)" class="px-4 py-1.5 rounded-full border border-blue-300 text-blue-700 bg-white hover:bg-blue-50 text-sm shadow-sm">
+                                                    {{ typeof op === 'string' ? op : (op.period || op.department || op.doctor_name || '确认') }}
+                                                </button>
+                                            </div>
                                         </div>
-                                    </div>
-
-                                    <div class="shrink-0">
-                                        <h3 class="font-medium mb-2 text-sm text-gray-600">📝 手语输入上屏区</h3>
-                                        <div class="word-sequence flex flex-wrap gap-2 min-h-[48px] p-2 bg-gray-50 border border-gray-100 rounded-lg items-center">
-                                            <span v-if="vueWordSequence.length === 0" class="placeholder text-gray-400 text-sm px-2">通过手语识别后，点头将词汇添加至此</span>
-                                            <span v-for="(word, idx) in vueWordSequence" :key="idx" class="word-tag bg-green-100 border border-green-200 text-green-800 px-3 py-1 rounded-full text-sm flex items-center">
-                                                {{ word }}
-                                                <button @click="agent.deleteWord(idx)" class="ml-2 text-green-600 hover:text-red-500 font-bold">&times;</button>
-                                            </span>
+                                        <!-- SUCCESS -->
+                                        <div v-else-if="assistantPhase === 'SUCCESS'" class="space-y-3">
+                                            <div class="text-5xl">🎉</div>
+                                            <div class="text-xl font-bold text-green-700">挂号成功！</div>
+                                            <div class="text-gray-600 text-sm">{{ assistantDisplayText }}</div>
                                         </div>
                                     </div>
 
-                                    <div class="flex flex-wrap gap-2 justify-end shrink-0">
-                                        <button @click="clearSequence" class="text-sm text-gray-600 px-3 py-1.5 rounded-lg border hover:bg-gray-50">清空输入</button>
-                                        <button @click="startScanning" class="text-sm bg-indigo-50 text-indigo-600 px-3 py-1.5 rounded-lg hover:bg-indigo-100 font-medium">✨ 模拟手语整句发送</button>
+                                    <!-- 底部：识别结果 + 输入框 + 确认发送 -->
+                                    <div class="shrink-0 space-y-2">
+                                        <div class="flex items-center justify-between">
+                                            <h3 class="font-medium text-sm text-gray-600">📝 手语识别结果</h3>
+                                            <button @click="clearSignInput" class="text-xs text-gray-400 hover:text-red-500">清空</button>
+                                        </div>
+                                        <div class="word-sequence flex flex-wrap gap-2 min-h-[36px] p-2 rounded-lg items-center" :class="continuousWords.length > 0 ? 'bg-green-50 border-2 border-green-300' : 'bg-gray-50 border border-gray-100'">
+                                            <span v-if="continuousWords.length === 0" class="text-gray-400 text-xs px-1">识别到的词汇将显示在这里</span>
+                                            <span v-for="(word, idx) in continuousWords" :key="idx" class="word-tag bg-green-500 text-white px-2 py-1 rounded-full text-xs font-medium animate-fadeIn">{{ word }}</span>
+                                        </div>
+                                        <div class="flex gap-2">
+                                            <input v-model="agentInputText" @keyup.enter="sendAgentInput" placeholder="可直接编辑或打字..." class="flex-1 border rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-orange-300 outline-none" />
+                                            <button @click="sendAgentInput" class="bg-blue-600 text-white px-4 py-2 rounded-xl text-sm hover:bg-blue-700 font-medium whitespace-nowrap">确认发送 →</button>
+                                        </div>
                                     </div>
                                 </div>
 
