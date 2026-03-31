@@ -277,6 +277,19 @@ class PolishRequest(BaseModel):
 
 @router.post("/consultation/polish")
 def polish_consultation_words(req: PolishRequest):
-    # 🌟 调用同一个 Agent，执行【面诊阶段】任务
-    polished_text = unified_medical_agent.consultation_stage_polish(req.words, req.context)
-    return {"polished_text": polished_text}
+    # 🌟 调用同一个 Agent，执行【面诊阶段】任务，现在它会返回包含了 insight 的字典
+    agent_result = unified_medical_agent.consultation_stage_polish(req.words, req.context)
+    return agent_result
+
+# ===========================================================================
+# 🌟 新增端点：划词术语解释 API
+# ===========================================================================
+class ExplainRequest(BaseModel):
+    term: str
+    context: str = ""
+
+@router.post("/consultation/explain")
+def explain_medical_term(req: ExplainRequest):
+    # 调用大模型生成基于上下文的解释
+    explanation = unified_medical_agent.explain_medical_term(req.term, req.context)
+    return {"explanation": explanation}

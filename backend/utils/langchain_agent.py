@@ -47,6 +47,13 @@ class HybridAgentDecision(BaseModel):
     symptom_struct: SymptomStruct = Field(default_factory=SymptomStruct)
 
 
+# 🌟 重构：将面诊阶段的输出改为“客观事实提炼”
+class ConsultationOutput(BaseModel):
+    polished_text: str = Field(description="结合语境润色后的通顺患者自然语言")
+    objective_summary: str = Field(default="",
+                                   description="【静默书记员能力】客观提炼当前对话中暴露的症状、病程等事实，用于辅助医生书写病历（例如：'头痛3天，伴发热'）。绝不能给出任何诊断或用药建议！如果没有实质性医疗信息，返回空字符串。")
+
+
 def _fallback_analyze(text: str) -> Dict[str, Any]:
     lower_text = text.lower()
     return {
@@ -58,10 +65,6 @@ def _fallback_analyze(text: str) -> Dict[str, Any]:
     }
 
 
-# ==============================================================================
-# 🌟 核心重构：统一智慧医疗智能体 (Unified Smart Hospital Agent)
-# 完美回答老师的问题：这是一个拥有生命周期管理的统一 Agent！
-# ==============================================================================
 class SmartHospitalAgent:
     def __init__(self):
         """初始化同一个智能体大脑"""
@@ -80,7 +83,6 @@ class SmartHospitalAgent:
 
     # --------------------------------------------------------------------------
     # 阶段一：挂号分诊阶段 (Triage Stage)
-    # 任务：主动追问、结构化信息提取
     # --------------------------------------------------------------------------
     def triage_stage_understand(self, text: str, known_slots: Dict[str, Any],
                                 known_symptom: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -157,14 +159,14 @@ class SmartHospitalAgent:
             return fallback
 
     # --------------------------------------------------------------------------
-    # 阶段二：诊间面诊阶段 (Consultation Stage)
-    # 任务：放弃追问，转为结合上下文的同声传译与润色
+    # 阶段二：诊间面诊阶段 (Consultation Stage) - 🌟 化身为静默病历书记员
     # --------------------------------------------------------------------------
-    def consultation_stage_polish(self, words: List[str], context: str) -> str:
-        fallback_text = "，".join(words)
-        if not self.llm or not PromptTemplate:
-            return fallback_text
+    def consultation_stage_polish(self, words: List[str], context: str) -> Dict[str, str]:
+        fallback_res = {"polished_text": "，".join(words), "objective_summary": ""}
+        if not self.llm or not JsonOutputParser:
+            return fallback_res
 
+        parser = JsonOutputParser(pydantic_object=ConsultationOutput)
         prompt = PromptTemplate(
             template=(
                 "你是三甲医院的统一智慧医疗 Agent，当前处于【诊间面诊同传阶段】。\n"
@@ -172,25 +174,56 @@ class SmartHospitalAgent:
                 "这是最近的医患聊天记录上下文：\n"
                 "=====\n{context}\n=====\n\n"
                 "患者刚才比划了以下几个零碎的手语词汇：{words}\n\n"
-                "【任务】\n"
-                "请结合医生的上下文，将患者的手语词汇翻译成一句自然、通顺、符合语境的话。\n"
-                "要求：\n"
-                "1. 语气必须是患者对医生说话的礼貌口吻（如“医生您好”，“我感觉”）。\n"
-                "2. 绝对不能超出患者提供的词汇范畴去捏造病情！\n"
-                "3. 只输出润色后的一句话，不要输出任何多余的解释。"
+                "【Agent 核心任务】\n"
+                "1. 翻译润色 (polished_text)：结合医生的上下文，将患者的手语词汇翻译成一句通顺的、患者视角的礼貌回复。绝不能捏造病情！\n"
+                "2. 病历提炼 (objective_summary)：作为静默书记员，客观提炼当前对话暴露的症状事实（如：'头痛3天，伴发热'）。绝不能给出任何诊断、排查建议或用药指导！这是为了帮医生省去写病历的时间。若无实质症状信息，输出空字符串。\n"
+                "\n必须严格按照 JSON 格式输出：\n{format_instructions}"
             ),
-            input_variables=["context", "words"]
+            input_variables=["context", "words"],
+            partial_variables={"format_instructions": parser.get_format_instructions()},
+        )
+
+        try:
+            result = (prompt | self.llm | parser).invoke({
+                "context": context or "无上下文",
+                "words": "、".join(words)
+            })
+            return result
+        except Exception as e:
+            print(f"❌ 面诊阶段 Agent 解析异常: {e}")
+            return fallback_res
+
+    # --------------------------------------------------------------------------
+    # 阶段三：划词术语解释 (Term Explanation) - 🌟 接入大模型医学百科
+    # --------------------------------------------------------------------------
+    def explain_medical_term(self, term: str, context: str) -> str:
+        if not self.llm:
+            return f"系统提示：当前网络未连接，无法解释术语【{term}】。"
+
+        prompt = PromptTemplate(
+            template=(
+                "你是三甲医院的专业医疗助手。患者在面诊过程中，对医生提到的术语【{term}】感到困惑。\n"
+                "这是他们当时的对话上下文：\n"
+                "=====\n{context}\n=====\n\n"
+                "【任务】\n"
+                "请用非常通俗、易懂、温暖的大白话（就像向毫无医学背景的老年人解释一样）来解释这个术语。\n"
+                "要求：\n"
+                "1. 消除患者的恐惧感。\n"
+                "2. 字数尽量控制在 100-150 字左右。\n"
+                "3. 只输出解释内容，不要加任何诸如'好的'之类的客套话。"
+            ),
+            input_variables=["term", "context"]
         )
 
         try:
             result = (prompt | self.llm).invoke({
-                "context": context or "无上下文",
-                "words": "、".join(words)
+                "term": term,
+                "context": context or "无上下文"
             })
             return result.content.strip()
         except Exception as e:
-            print(f"❌ 面诊阶段 Agent 润色异常: {e}")
-            return fallback_text
+            print(f"❌ 术语解释异常: {e}")
+            return f"抱歉，系统暂时无法解释该术语【{term}】。"
 
 
 # 全局单例实例化，确保整个系统运行期间是“同一个 Agent”

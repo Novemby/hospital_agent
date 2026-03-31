@@ -1,4 +1,4 @@
-import { createApp, ref, computed, onMounted, onUnmounted, watch } from 'vue';
+import { createApp, ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue';
 import { getPatients, getPatientById, upsertPatient, addMessage, syncPatientsFromBackend } from './services/patientService.js';
 import { doctorLoginAPI, setCurrentDoctor, getCurrentDoctor, getCurrentDoctorDept, clearAuth } from './services/authService.js';
 import { SignLanguageAgent } from './services/signLanguageAgent.js';
@@ -116,12 +116,22 @@ const app = createApp({
             doctorVoiceText.value = '';
         };
 
-        const patientMessages = computed(() => {
+        // 🌟 核心升级：获取医患双向消息，实现类似微信的双向对答
+        const chatContainerDoc = ref(null);
+        const chatMessages = computed(() => {
             if (!selectedPatient.value) return [];
             return (selectedPatient.value.messages || [])
-                .filter(m => m.type === 'pat')
+                .filter(m => m.type === 'pat' || m.type === 'doc')
                 .sort((a, b) => a.id - b.id);
         });
+
+        // 监听消息变化，自动滚动到底部
+        watch(chatMessages, async () => {
+            await nextTick();
+            if (chatContainerDoc.value) {
+                chatContainerDoc.value.scrollTop = chatContainerDoc.value.scrollHeight;
+            }
+        }, { deep: true });
 
         const formatTime = (timestamp) => {
             if (!timestamp) return '';
@@ -255,17 +265,6 @@ const app = createApp({
             termExplanation.value = termDict[term] || '暂无解释';
         };
 
-        const doctorMessagesForPatient = computed(() => {
-            if (!selectedPatient.value) return [];
-            return selectedPatient.value.messages?.filter(m => m.type === 'doc').slice(-5) || [];
-        });
-
-        const sendVoiceMessage = () => {
-            if (!voiceInput.value.trim() || !selectedPatient.value) return;
-            addMessage(selectedPatient.value.id, { type: 'doc', content: voiceInput.value });
-            voiceInput.value = '';
-        };
-
         const openPatientAssist = () => {
             if (!selectedPatient.value) return alert('请先选择一位患者');
             if (handsignWindow && !handsignWindow.closed) {
@@ -297,18 +296,18 @@ const app = createApp({
         return {
             view, doctorId, doctorPwd, doctorDept, loginLoading,
             patients, selectedPatientId, selectedPatient,
-            doctorMessagesForPatient, voiceInput,
+            voiceInput,
             selectedTerm, termExplanation,
             showAddPrescription, newRx,
             goToRoleSelect, doctorLogin, logout, selectPatient,
             saveMedicalHistory, finishConsultation, addPrescription, removePrescription,
-            sendVoiceMessage, openPatientAssist, backToDoctor,
+            openPatientAssist, backToDoctor,
             queryTerm,
             isHandsignOpen,
             doctorVoiceText, doctorRecognizedText, isRecordingVoiceForDoc,
             startDoctorVoiceRecording, stopDoctorVoiceRecording,
             confirmDoctorVoiceText, cancelDoctorVoiceText, sendDoctorVoiceMessage,
-            patientMessages, formatTime
+            chatMessages, chatContainerDoc, formatTime
         };
     },
     template: `
@@ -417,7 +416,6 @@ const app = createApp({
                                 伴随症状：<span v-for="sym in selectedPatient.triage_struct.accompanying_symptoms" :key="sym" class="bg-orange-100 text-orange-700 px-2 py-0.5 rounded shadow-sm mr-2">{{ sym }}</span>
                             </div>
                             
-                            <!-- 🌟 补回误删的原话内容 -->
                             <div v-if="selectedPatient.triage_struct.original_text" class="text-xs text-gray-500 mt-3 bg-white p-3 rounded-lg border border-indigo-50 leading-relaxed italic shadow-inner">
                                 <span class="font-medium text-gray-400 not-italic mr-1">参考原话：</span>"{{ selectedPatient.triage_struct.original_text }}"
                             </div>
@@ -429,13 +427,12 @@ const app = createApp({
                     </div>
                 </div>
 
-                <!-- 🌟 核心布局改动：取消强制拉伸，恢复自然留白呼吸感 -->
                 <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
                     
                     <!-- 主工作区：病历与处方 -->
                     <div :class="isHandsignOpen ? 'lg:col-span-7' : 'lg:col-span-12'" class="flex flex-col gap-6 transition-all duration-500">
                         
-                        <!-- 病历记录区域 (去掉默认占位提示符) -->
+                        <!-- 病历记录区域 -->
                         <div class="bg-white p-6 rounded-2xl shadow-sm">
                             <div class="flex justify-between items-center mb-3">
                                 <h3 class="font-bold text-lg flex items-center gap-2"><span class="w-1.5 h-5 bg-blue-500 rounded-full"></span>病历记录与医嘱</h3>
@@ -444,7 +441,7 @@ const app = createApp({
                             <textarea v-model="selectedPatient.medicalHistory" :rows="isHandsignOpen ? 6 : 4" class="w-full border border-gray-200 rounded-xl p-3 text-sm focus:ring-2 focus:ring-blue-200 outline-none leading-relaxed transition-all resize-none"></textarea>
                         </div>
 
-                        <!-- 处方管理区域 (取消 flex-1 强制撑高) -->
+                        <!-- 处方管理区域 -->
                         <div class="bg-white p-6 rounded-2xl shadow-sm relative">
                             <div class="flex justify-between items-center mb-3">
                                 <h3 class="font-bold text-lg flex items-center gap-2"><span class="w-1.5 h-5 bg-green-500 rounded-full"></span>处方管理</h3>
@@ -485,18 +482,40 @@ const app = createApp({
                     <!-- 专属沟通面板：仅在手语开启时展示，固定在右侧占5列 -->
                     <div v-if="isHandsignOpen" class="lg:col-span-5 bg-indigo-50/50 rounded-2xl border border-indigo-100 p-4 flex flex-col h-[calc(100vh-250px)] sticky top-6 shadow-inner">
                         
-                        <!-- 聊天记录区域 (自动撑满上方空间) -->
+                        <!-- 🌟 聊天记录区域：双向同频显示 -->
                         <div class="bg-white rounded-xl shadow-sm border border-indigo-50 p-4 mb-4 flex-1 flex flex-col overflow-hidden">
                             <h3 class="font-bold text-base flex items-center gap-2 mb-3 shrink-0 text-indigo-900">
-                                <span class="w-1.5 h-4 bg-indigo-500 rounded-full"></span>患者实时手语沟通
+                                <span class="w-1.5 h-4 bg-indigo-500 rounded-full"></span>实时医患交流板
                             </h3>
-                            <div class="flex-1 overflow-y-auto pr-2 space-y-3 scrollbar-thin">
-                                <div v-if="patientMessages.length === 0" class="text-gray-400 text-center py-8 text-sm">
-                                    辅屏已打开，等待患者输入手语...
+                            <div ref="chatContainerDoc" class="flex-1 overflow-y-auto pr-2 space-y-4 scrollbar-thin">
+                                <div v-if="chatMessages.length === 0" class="text-gray-400 text-center py-8 text-sm">
+                                    辅屏已打开，等待沟通...
                                 </div>
-                                <div v-for="msg in patientMessages" :key="msg.id" class="bg-indigo-50 border border-indigo-100 p-3 rounded-xl text-sm text-gray-800 leading-relaxed shadow-sm">
-                                    {{ msg.content }}
-                                    <div class="text-xs text-indigo-400 mt-1 text-right">{{ formatTime(msg.created_at) }}</div>
+                                
+                                <div v-for="msg in chatMessages" :key="msg.id" class="flex w-full" :class="msg.type === 'doc' ? 'justify-end' : 'justify-start'">
+                                    
+                                    <!-- 👨‍⚕️ 医生自己发出的消息 (靠右) -->
+                                    <div v-if="msg.type === 'doc'" class="flex items-start gap-2 flex-row-reverse max-w-[85%]">
+                                        <div class="w-8 h-8 rounded-full bg-purple-100 flex items-center justify-center text-purple-600 font-bold shrink-0 text-xs">我</div>
+                                        <div class="text-right">
+                                            <div class="bg-purple-600 text-white rounded-2xl rounded-tr-none px-4 py-2.5 shadow-sm text-sm leading-relaxed text-left inline-block">
+                                                {{ msg.content }}
+                                            </div>
+                                            <div class="text-xs text-gray-400 mt-1 mr-1">{{ formatTime(msg.created_at) }}</div>
+                                        </div>
+                                    </div>
+
+                                    <!-- 👤 患者的手语消息 (靠左) -->
+                                    <div v-else class="flex items-start gap-2 max-w-[85%]">
+                                        <div class="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 font-bold shrink-0 text-xs">患</div>
+                                        <div>
+                                            <div class="bg-indigo-50 border border-indigo-100 rounded-2xl rounded-tl-none px-4 py-2.5 text-sm text-gray-800 leading-relaxed shadow-sm">
+                                                {{ msg.content }}
+                                            </div>
+                                            <div class="text-xs text-gray-400 mt-1 ml-1">{{ formatTime(msg.created_at) }}</div>
+                                        </div>
+                                    </div>
+
                                 </div>
                             </div>
                         </div>
