@@ -16,6 +16,10 @@ const app = createApp({
         // 手动文字输入与摘要
         const textInput = ref('');
         const aiSummary = ref('');
+        const doctorContext = ref('');
+        const riskNote = ref('');
+        const patientReminder = ref('');
+        const memoryHits = ref([]);
 
         // ==================== 🌟 新增：划词翻译与术语解释状态 ====================
         const selectedText = ref('');
@@ -330,6 +334,10 @@ const app = createApp({
         const callAgentPolish = async (wordsArray) => {
             isPolishing.value = true;
             let finalSentence = wordsArray.join('，');
+            doctorContext.value = '';
+            riskNote.value = '';
+            patientReminder.value = '';
+            memoryHits.value = [];
 
             try {
                 const recentContext = chatMessages.value.slice(-4).map(m =>
@@ -341,6 +349,7 @@ const app = createApp({
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
+                        patient_id: Number(patientId),
                         words: wordsArray,
                         context: recentContext
                     })
@@ -348,20 +357,44 @@ const app = createApp({
 
                 if (response.ok) {
                     const data = await response.json();
-                    if (data && data.polished_text) {
-                        finalSentence = data.polished_text;
-                        if (data.objective_summary && data.objective_summary.trim() !== "") {
-                            aiSummary.value = data.objective_summary;
+                    if (data) {
+                        finalSentence = data.patient_expression || data.polished_text || finalSentence;
+                        aiSummary.value = data.objective_summary || '';
+                        doctorContext.value = data.doctor_context || '';
+                        riskNote.value = data.risk_note || '';
+                        patientReminder.value = data.patient_gentle_reminder || '';
+                        memoryHits.value = Array.isArray(data.memory_hits) ? data.memory_hits : [];
 
+                        if (aiSummary.value.trim() !== "") {
                             const p = getPatientById(patientId);
                             if (p) {
                                 p.triage_struct = {
                                     ...p.triage_struct,
-                                    primary_symptom: data.objective_summary,
+                                    primary_symptom: aiSummary.value,
                                     original_text: finalSentence
+                                };
+                                p.ai_assist = {
+                                    objective_summary: aiSummary.value,
+                                    doctor_context: doctorContext.value,
+                                    risk_note: riskNote.value,
+                                    patient_gentle_reminder: patientReminder.value,
+                                    memory_hits: memoryHits.value,
+                                    patient_expression: finalSentence
                                 };
                                 upsertPatient(p);
                             }
+                        }
+                        const p = getPatientById(patientId);
+                        if (p) {
+                            p.ai_assist = {
+                                objective_summary: aiSummary.value,
+                                doctor_context: doctorContext.value,
+                                risk_note: riskNote.value,
+                                patient_gentle_reminder: patientReminder.value,
+                                memory_hits: memoryHits.value,
+                                patient_expression: finalSentence
+                            };
+                            upsertPatient(p);
                         }
                     }
                 }
@@ -396,7 +429,7 @@ const app = createApp({
         return {
             patientId, doctorId, patientInfo, chatMessages, chatContainer,
             vueWordSequence, currentWord, statusText, overlayText, overlayClass, cameraStarted,
-            textInput, aiSummary, isPolishing,
+            textInput, patientReminder, isPolishing,
             continuousActive, continuousWords,
             // 新增返回的状态和方法
             selectedText, showExplainBtn, explainBtnStyle, showExplainModal, explanationContent, isExplaining,
@@ -531,12 +564,13 @@ const app = createApp({
                             <span class="text-xs text-gray-400">实时同步中...</span>
                         </div>
 
-                        <!-- 🌟 Agent 静默提炼预警框 -->
-                        <div v-if="aiSummary" class="bg-[#eef2ff]/80 border-b border-[#e0e7ff] px-6 py-3 text-sm flex items-start gap-3 shrink-0 shadow-inner">
-                            <div class="text-xl leading-none mt-0.5">💡</div>
-                            <div class="flex-1">
-                                <div class="font-bold text-[#4338ca] text-xs mb-1">AI 实时病历提炼 (静默同步给医生)</div>
-                                <div class="text-[#3730a3] leading-relaxed">{{ aiSummary }}</div>
+                        <div v-if="patientReminder" class="border-b border-[#bbf7d0] shrink-0 shadow-inner bg-[#f0fdf4]">
+                            <div class="px-6 py-3 text-sm flex items-start gap-3">
+                                <div class="text-xl leading-none mt-0.5">🌿</div>
+                                <div class="flex-1">
+                                    <div class="font-bold text-[#15803d] text-xs mb-1">给患者的温和提醒</div>
+                                    <div class="text-[#166534] leading-relaxed">{{ patientReminder }}</div>
+                                </div>
                             </div>
                         </div>
                         

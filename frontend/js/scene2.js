@@ -14,12 +14,15 @@ const app = createApp({
         const doctorDept = ref(storedDoctor ? (storedDoctor.dept || storedDoctor.department) : '');
         const patients = ref([]);
         const selectedPatientId = ref('');
+        const medicalHistoryDraft = ref('');
+        const diagnosisDraft = ref('');
         let patientSyncInterval = null;
 
         // 🌟 核心修复：把 selectedPatient 挪到最上面！防止后面 computed 用到时报未初始化的错
         const selectedPatient = computed(() => {
             return patients.value.find(p => String(p.id) === String(selectedPatientId.value)) || null;
         });
+        const aiAssistInfo = computed(() => selectedPatient.value?.ai_assist || null);
 
         // ========== 2. UI 组件与表单状态 ==========
         const showAddPrescription = ref(false);
@@ -155,6 +158,11 @@ const app = createApp({
             window.location.href = 'index.html';
         };
 
+        const hydrateDraftFromSelectedPatient = () => {
+            medicalHistoryDraft.value = selectedPatient.value?.medicalHistory || '';
+            diagnosisDraft.value = selectedPatient.value?.diagnosis || '';
+        };
+
         const syncAndLoadPatients = async (keepSelection = true) => {
             if (doctorDept.value && typeof syncPatientsFromBackend === 'function') {
                 try {
@@ -226,6 +234,10 @@ const app = createApp({
             }
         };
 
+        watch(selectedPatientId, () => {
+            hydrateDraftFromSelectedPatient();
+        });
+
         onMounted(() => {
             window.addEventListener('storage', handleStorageChange);
             window.addEventListener('focus', loadPatients);
@@ -234,6 +246,7 @@ const app = createApp({
             if (storedDoctor && doctorDept.value) {
                 loadPatients();
                 patientSyncInterval = window.setInterval(loadPatients, 15000);
+                hydrateDraftFromSelectedPatient();
             }
         });
 
@@ -259,6 +272,8 @@ const app = createApp({
         // 🌟 核心升级：点击保存时，既更新本地缓存（0.01秒UI同步），也发送到后端真实落库
         const saveMedicalHistory = async () => {
             if (selectedPatient.value) {
+                selectedPatient.value.medicalHistory = medicalHistoryDraft.value;
+                selectedPatient.value.diagnosis = diagnosisDraft.value;
                 // 1. 乐观更新：先保存进本地缓存，让同电脑的患者大厅瞬间同步看到
                 selectedPatient.value.lastUpdated = new Date().toLocaleTimeString();
                 upsertPatient(selectedPatient.value);
@@ -270,8 +285,8 @@ const app = createApp({
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
-                            medical_history: selectedPatient.value.medicalHistory || '',
-                            diagnosis: selectedPatient.value.diagnosis || '',
+                            medical_history: medicalHistoryDraft.value || '',
+                            diagnosis: diagnosisDraft.value || '',
                             prescriptions: selectedPatient.value.prescriptions || [],
                             doctor_id: currentDoctor?.id || null
                         })
@@ -293,10 +308,10 @@ const app = createApp({
         const applyAiSummary = () => {
             if (selectedPatient.value?.triage_struct?.primary_symptom) {
                 const summary = "【AI 辅助提炼】" + selectedPatient.value.triage_struct.primary_symptom;
-                const current = selectedPatient.value.medicalHistory || '';
+                const current = medicalHistoryDraft.value || '';
                 // 如果还没填过，才追加进去，防止重复点击
                 if (!current.includes(summary)) {
-                    selectedPatient.value.medicalHistory = current ? current + '\n\n' + summary : summary;
+                    medicalHistoryDraft.value = current ? current + '\n\n' + summary : summary;
                 }
             }
         };
@@ -391,9 +406,11 @@ const app = createApp({
         return {
             view, doctorId, doctorPwd, doctorDept, loginLoading,
             patients, selectedPatientId, selectedPatient,
+            aiAssistInfo,
             voiceInput,
             selectedTerm, termExplanation,
             showAddPrescription, newRx,
+            medicalHistoryDraft, diagnosisDraft,
             goToRoleSelect, doctorLogin, logout, selectPatient,
             saveMedicalHistory, finishConsultation, addPrescription, removePrescription,
             applyAiSummary, // 🌟 暴露给模板
@@ -525,6 +542,33 @@ const app = createApp({
                             </div>
                         </div>
 
+                        <div v-if="aiAssistInfo && (aiAssistInfo.objective_summary || aiAssistInfo.doctor_context || aiAssistInfo.risk_note)" class="bg-white rounded-2xl shadow-sm border border-slate-200 mb-6 overflow-hidden">
+                            <div class="flex flex-col xl:flex-row xl:items-stretch">
+                                <div class="xl:w-44 shrink-0 px-5 py-4 border-b xl:border-b-0 xl:border-r border-slate-200 bg-slate-50">
+                                    <div class="text-[11px] font-bold tracking-[0.18em] text-slate-500 uppercase mb-1">Clinical AI</div>
+                                    <div class="text-sm font-semibold text-slate-900 leading-6">辅助提示条</div>
+                                </div>
+                                <div class="flex-1 px-4 py-3">
+                                    <div class="flex flex-col gap-2">
+                                        <div v-if="aiAssistInfo.risk_note" class="flex items-start gap-3 rounded-xl border border-orange-200 bg-orange-50 px-4 py-3">
+                                            <div class="mt-0.5 text-orange-600 text-sm font-bold shrink-0">风险</div>
+                                            <div class="text-sm leading-6 text-slate-800">{{ aiAssistInfo.risk_note }}</div>
+                                        </div>
+                                        <div class="grid grid-cols-1 2xl:grid-cols-2 gap-2">
+                                            <div v-if="aiAssistInfo.objective_summary" class="flex items-start gap-3 rounded-xl border border-indigo-100 bg-indigo-50/70 px-4 py-3">
+                                                <div class="mt-0.5 text-indigo-600 text-sm font-bold shrink-0">提炼</div>
+                                                <div class="text-sm leading-6 text-slate-800">{{ aiAssistInfo.objective_summary }}</div>
+                                            </div>
+                                            <div v-if="aiAssistInfo.doctor_context" class="flex items-start gap-3 rounded-xl border border-cyan-100 bg-cyan-50/70 px-4 py-3">
+                                                <div class="mt-0.5 text-cyan-700 text-sm font-bold shrink-0">辅助</div>
+                                                <div class="text-sm leading-6 text-slate-800">{{ aiAssistInfo.doctor_context }}</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
                         <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
                     
                     <!-- 主工作区：病历与处方 -->
@@ -544,10 +588,10 @@ const app = createApp({
                                     </button>
                                 </div>
                             </div>
-                            <textarea v-model="selectedPatient.medicalHistory" :rows="isHandsignOpen ? 6 : 4" class="w-full border border-gray-200 rounded-xl p-3 text-sm focus:ring-2 focus:ring-blue-200 outline-none leading-relaxed transition-all resize-none"></textarea>
+                            <textarea v-model="medicalHistoryDraft" :rows="isHandsignOpen ? 6 : 4" class="w-full border border-gray-200 rounded-xl p-3 text-sm focus:ring-2 focus:ring-blue-200 outline-none leading-relaxed transition-all resize-none"></textarea>
                             <div class="mt-4">
                                 <div class="text-sm text-gray-500 mb-2">临床诊断</div>
-                                <textarea v-model="selectedPatient.diagnosis" rows="2" class="w-full border border-gray-200 rounded-xl p-3 text-sm focus:ring-2 focus:ring-blue-200 outline-none leading-relaxed transition-all resize-none" placeholder="请输入明确诊断，例如：急性胃肠炎"></textarea>
+                                <textarea v-model="diagnosisDraft" rows="2" class="w-full border border-gray-200 rounded-xl p-3 text-sm focus:ring-2 focus:ring-blue-200 outline-none leading-relaxed transition-all resize-none" placeholder="请输入明确诊断，例如：急性胃肠炎"></textarea>
                             </div>
                         </div>
 
@@ -591,7 +635,6 @@ const app = createApp({
 
                             <!-- 专属沟通面板：仅在手语开启时展示，固定在右侧占5列 -->
                             <div v-if="isHandsignOpen" class="lg:col-span-5 bg-indigo-50/50 rounded-2xl border border-indigo-100 p-4 flex flex-col h-[calc(100vh-250px)] sticky top-6 shadow-inner">
-                                
                                 <!-- 🌟 聊天记录区域：双向同频显示 -->
                                 <div class="bg-white rounded-xl shadow-sm border border-indigo-50 p-4 mb-4 flex-1 flex flex-col overflow-hidden">
                                     <h3 class="font-bold text-base flex items-center gap-2 mb-3 shrink-0 text-indigo-900">

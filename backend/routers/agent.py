@@ -47,6 +47,22 @@ def _detect_period(text: str) -> Optional[str]:
     return None
 
 
+def _sanitize_accompanying_symptoms(raw_text: str, symptoms: list) -> list:
+    if not symptoms:
+        return []
+
+    text = (raw_text or "").strip()
+    if not text:
+        return []
+
+    cleaned = []
+    for symptom in symptoms:
+        symptom_text = str(symptom).strip()
+        if symptom_text and symptom_text in text:
+            cleaned.append(symptom_text)
+    return cleaned
+
+
 def _next_missing_field(symptom: dict) -> Optional[str]:
     # 强制本地按顺序校验缺失槽位
     if not symptom.get("primary_symptom"):
@@ -169,6 +185,11 @@ def registration_agent_chat(payload: schemas.RegistrationAgentChatRequest, db: S
     # ==============================================================
     llm_symptom = decision.get("symptom_struct", {})
     if llm_symptom and isinstance(llm_symptom, dict):
+        if isinstance(llm_symptom.get("accompanying_symptoms"), list):
+            llm_symptom["accompanying_symptoms"] = _sanitize_accompanying_symptoms(
+                text,
+                llm_symptom.get("accompanying_symptoms", [])
+            )
         for k, v in llm_symptom.items():
             if v:  # 只有 LLM 真的提取到了内容才更新，拒绝 null 覆盖
                 if k == "accompanying_symptoms" and isinstance(v, list):

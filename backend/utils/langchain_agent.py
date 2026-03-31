@@ -83,8 +83,12 @@ class HybridAgentDecision(BaseModel):
     symptom_struct: SymptomStruct = Field(default_factory=SymptomStruct)
 
 class ConsultationOutput(BaseModel):
-    polished_text: str = Field(description="结合语境润色后的通顺患者自然语言")
+    patient_expression: str = Field(description="结合语境润色后的患者自然语言表达，供医生理解")
     objective_summary: str = Field(default="", description="客观提炼症状用于辅助病历，不包含任何风险警告或诊断建议。")
+    doctor_context: str = Field(default="", description="只给医生看的历史相关辅助信息，只允许事实性回顾，不给出诊断或处置建议。")
+    risk_note: str = Field(default="", description="只给医生看的历史高风险相似提醒，不包含检查、用药或处置建议。")
+    patient_gentle_reminder: str = Field(default="", description="给患者看的弱提醒，只允许建议确认或补充说明，不允许给出治疗建议。")
+    memory_hits: List[str] = Field(default_factory=list, description="本次命中的长期记忆关键词列表，便于调试和展示。")
 
 def _fallback_analyze(text: str) -> Dict[str, Any]:
     return {"intent": "register", "department": detect_department(text), "date": detect_date(text), "confirm": False, "triage_symptoms": text}
@@ -116,7 +120,12 @@ class SmartHospitalAgent:
                 "用户最新输入: {text}\n"
                 "【核心任务】\n"
                 "1. 结合长期画像推断意图。例如用户只说了'又疼了'，你需要去画像的'frequent_symptoms'或'chronic_conditions'里寻找部位，推荐对应科室。\n"
-                "2. 提取 symptom_struct。如果语意模糊，参考长期画像补全。\n"
+                "2. 提取 symptom_struct。\n"
+                "【重要约束】\n"
+                "- 允许你使用长期记忆帮助判断科室或理解“老毛病”“又犯了”这类省略表达。\n"
+                "- 但是 symptom_struct 中的 accompanying_symptoms 必须只填写本次输入里明确提到的伴随症状，绝对不能从长期记忆补写。\n"
+                "- symptom_struct 中的 body_part 也优先依据本次输入里的明确部位，不要把长期记忆里的旧部位当成这次新事实。\n"
+                "- 如果用户这次只说“肚子疼”，那就只能提取腹部/疼痛，不能擅自补成“反酸”“恶心”等伴随症状。\n"
                 "只输出合法的 JSON。\n{format_instructions}"
             ),
             input_variables=["patient_profile", "text"],
@@ -139,7 +148,14 @@ class SmartHospitalAgent:
     # 阶段二：面诊同传 (融入结构化长期记忆，且静默不报警)
     # --------------------------------------------------------------------------
     def consultation_stage_polish(self, words: List[str], context: str, patient_profile: str = "{}") -> Dict[str, str]:
-        fallback_res = {"polished_text": "，".join(words), "objective_summary": ""}
+        fallback_res = {
+            "patient_expression": "，".join(words),
+            "objective_summary": "",
+            "doctor_context": "",
+            "risk_note": "",
+            "patient_gentle_reminder": "",
+            "memory_hits": [],
+        }
         if not self.llm or not JsonOutputParser: return fallback_res
 
         parser = JsonOutputParser(pydantic_object=ConsultationOutput)
@@ -150,9 +166,17 @@ class SmartHospitalAgent:
                 "【当前诊间对话上下文】:\n{context}\n\n"
                 "患者手语词汇：{words}\n\n"
                 "【Agent 核心任务】\n"
-                "1. 翻译润色 (polished_text)：结合画像和上下文翻译。若患者说'老毛病'，请根据画像中的 chronic_conditions 翻译出具体病名。\n"
-                "2. 病历提炼 (objective_summary)：作为静默辅助，客观提炼症状用于病历草稿。\n"
-                "⚠️ 绝对禁止在输出中包含针对医生的风险警告或教导！你只是个底层的理解引擎。\n"
+                "1. 患者表达 (patient_expression)：结合画像和上下文翻译。若患者说“老毛病”“又犯了”，可参考 chronic_conditions 或 frequent_symptoms 补全表达，但必须保持患者原意。\n"
+                "2. 病历提炼 (objective_summary)：客观提炼症状用于病历草稿。\n"
+                "3. 医生辅助 (doctor_context)：如果长期记忆中存在与当前主诉明确相关的既往症状、慢病或就诊史，给出一句事实性辅助信息。只允许历史事实，不允许诊断建议、用药建议或检查建议。\n"
+                "4. 风险提示 (risk_note)：只有当 risk_history 中存在与当前表达明显相似的高风险历史时，才输出一句提醒。例如“检测到与既往高风险症状相似（如尿血），建议优先关注”。不能输出检查/用药/治疗建议。\n"
+                "5. 患者弱提醒 (patient_gentle_reminder)：只有在命中长期记忆且适合提醒患者补充说明时才输出。必须使用“建议确认”“建议告知医生”“建议进一步说明”这类措辞，绝对禁止出现用药、检查、治疗等建议。\n"
+                "6. memory_hits：只列出本次真正命中的关键词或记忆点，最多 5 个。\n"
+                "【硬约束】\n"
+                "- doctor_context、risk_note、patient_gentle_reminder 在未命中相关长期记忆时必须返回空字符串。\n"
+                "- doctor_context 只能写事实，如“患者历史中多次出现腹痛、恶心”。\n"
+                "- risk_note 只能写“与既往高风险症状相似/相关”的提醒，不能扩展为医疗决策。\n"
+                "- patient_gentle_reminder 只能写弱提醒，不能写“建议检查”“建议用药”“建议复查”。\n"
                 "\n必须严格按照 JSON 格式输出：\n{format_instructions}"
             ),
             input_variables=["context", "words", "patient_profile"],
