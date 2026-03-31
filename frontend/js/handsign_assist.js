@@ -104,12 +104,17 @@ const app = createApp({
         // 初始化加载患者数据
         const loadPatientData = () => {
             if (patientId) {
-                patientInfo.value = getPatientById(patientId);
-                if (patientInfo.value && patientInfo.value.messages) {
-                    chatMessages.value = patientInfo.value.messages
-                        .filter(m => m.type !== 'sys')
-                        .sort((a, b) => a.id - b.id);
-                    scrollToBottom();
+                // 每次都从 localStorage 获取最新数据
+                const freshPatient = getPatientById(patientId);
+                if (freshPatient) {
+                    patientInfo.value = freshPatient;
+                    if (freshPatient.messages) {
+                        // 获取所有医患消息，按时间排序
+                        chatMessages.value = freshPatient.messages
+                            .filter(m => m.type === 'pat' || m.type === 'doc')
+                            .sort((a, b) => (a.id || 0) - (b.id || 0));
+                        scrollToBottom();
+                    }
                 }
             }
         };
@@ -120,9 +125,18 @@ const app = createApp({
             }
         };
 
+        // 定时刷新患者数据，确保消息实时更新
+        let refreshInterval = null;
+
         onMounted(() => {
             loadPatientData();
             window.addEventListener('storage', handleStorageChange);
+
+            // 每2秒刷新一次消息列表
+            refreshInterval = setInterval(() => {
+                loadPatientData();
+            }, 2000);
+
             setTimeout(() => {
                 startCamera();
             }, 500);
@@ -137,6 +151,7 @@ const app = createApp({
 
         onUnmounted(() => {
             window.removeEventListener('storage', handleStorageChange);
+            if (refreshInterval) clearInterval(refreshInterval);
             agent.stopCamera();
             clearHeadGestureTimer();
         });
@@ -160,6 +175,10 @@ const app = createApp({
         const overlayClass = ref('overlay hidden');
         const cameraStarted = ref(false);
         const isPolishing = ref(false);
+
+        // 连续识别模式状态
+        const continuousActive = ref(false);
+        const continuousWords = ref([]);
 
         const waitingForHeadGesture = ref(false);
         let headGestureTimeout = null;
@@ -201,13 +220,13 @@ const app = createApp({
             },
             onStatusChange: (status, data) => {
                 if (status === 'recordingStart') {
-                    statusText.value = '请在屏幕前比划手语...';
-                    overlayText.value = '录制中...';
-                    overlayClass.value = 'overlay recording bg-red-500/80';
+                    statusText.value = '📹 正在捕捉动作...';
+                    overlayText.value = '';
+                    overlayClass.value = 'overlay hidden';
                 } else if (status === 'sending') {
-                    statusText.value = `正在理解中...`;
-                    overlayText.value = `处理中...`;
-                    overlayClass.value = 'overlay bg-yellow-500/80';
+                    statusText.value = `🔄 AI 正在理解中...`;
+                    overlayText.value = '';
+                    overlayClass.value = 'overlay hidden';
                 } else if (status === 'resultReady') {
                     statusText.value = '👉 请点头确认添加，或摇头切换';
                     overlayText.value = data.prediction;
@@ -218,6 +237,15 @@ const app = createApp({
                     overlayClass.value = 'overlay hidden';
                 } else if (status === 'wordConfirmed') {
                     statusText.value = `✓ 已记录「${data.word}」`;
+                    overlayClass.value = 'overlay hidden';
+                } else if (status === 'continuousStart') {
+                    statusText.value = '🤟 连续识别已启动，请开始比划';
+                    overlayClass.value = 'overlay hidden';
+                } else if (status === 'continuousReady') {
+                    statusText.value = '🤟 连续识别中，等待手势...';
+                    overlayClass.value = 'overlay hidden';
+                } else if (status === 'continuousStop') {
+                    statusText.value = '连续识别已停止';
                     overlayClass.value = 'overlay hidden';
                 }
             },
@@ -240,6 +268,18 @@ const app = createApp({
                         statusText.value = `切换为「${newCandidate.label}」，请点头确认`;
                     }
                 }
+            },
+            // 连续识别回调
+            onWordRecognized: (word, confidence) => {
+                if (continuousActive.value) {
+                    // 追加新识别的词汇，保持时间顺序
+                    continuousWords.value.push(word);
+                    statusText.value = `✓ 识别到「${word}」`;
+                }
+            },
+            onSentenceComplete: (words) => {
+                // 句子完成回调，但我们已经通过 onWordRecognized 实时添加了
+                // 这里不需要做任何操作，避免覆盖已有结果
             }
         });
 
@@ -256,6 +296,29 @@ const app = createApp({
         const toggleRecording = () => {
             if (agent.isRecording) agent.stopRecording();
             else agent.startRecording();
+        };
+
+        // 连续识别控制
+        const startContinuousRecognition = () => {
+            if (!cameraStarted.value) return;
+            continuousActive.value = true;
+            // 不清空已有结果，保留之前识别的内容
+            agent.startContinuous();
+        };
+
+        const stopContinuousRecognition = () => {
+            continuousActive.value = false;
+            agent.stopContinuous();
+            // 停止后不清空结果，保留识别内容
+        };
+
+        const clearContinuousWords = () => {
+            continuousWords.value = [];
+            agent.clearSentenceBuffer();
+        };
+
+        const removeWord = (index) => {
+            continuousWords.value.splice(index, 1);
         };
 
         const clearSequence = () => {
@@ -319,9 +382,9 @@ const app = createApp({
         };
 
         const polishAndSend = async () => {
-            if (vueWordSequence.value.length === 0) return;
-            await callAgentPolish(vueWordSequence.value);
-            clearSequence();
+            if (continuousWords.value.length === 0) return;
+            await callAgentPolish(continuousWords.value);
+            clearContinuousWords();
         };
 
         const formatTimeDisplay = (timestamp) => {
@@ -334,10 +397,12 @@ const app = createApp({
             patientId, doctorId, patientInfo, chatMessages, chatContainer,
             vueWordSequence, currentWord, statusText, overlayText, overlayClass, cameraStarted,
             textInput, aiSummary, isPolishing,
+            continuousActive, continuousWords,
             // 新增返回的状态和方法
             selectedText, showExplainBtn, explainBtnStyle, showExplainModal, explanationContent, isExplaining,
             handleMouseUp, explainSelected, closeExplainModal,
             startCamera, toggleRecording, clearSequence, polishAndSend, sendTextInput,
+            startContinuousRecognition, stopContinuousRecognition, clearContinuousWords, removeWord,
             agent, formatTimeDisplay
         };
     },
@@ -414,13 +479,15 @@ const app = createApp({
                     <div class="video-container relative flex-1 rounded-2xl overflow-hidden bg-[#7f7f7f] min-h-[300px] shadow-inner">
                         <video id="webcam" autoplay playsinline class="w-full h-full object-cover"></video>
                         <canvas id="canvas" class="absolute top-0 left-0 w-full h-full"></canvas>
-                        
-                        <div :class="overlayClass" id="overlay" class="absolute inset-0 flex items-center justify-center text-3xl font-bold tracking-widest transition-all duration-300 text-white">
+
+                        <!-- 识别状态提示（右上角小标签） -->
+                        <div v-if="overlayText" class="absolute top-4 right-4 bg-gradient-to-r from-[#22c55e] to-[#16a34a] text-white px-4 py-2 rounded-xl text-sm font-bold shadow-lg flex items-center gap-2 animate-fade-in">
+                            <span class="w-2 h-2 rounded-full bg-white animate-pulse"></span>
                             {{ overlayText }}
                         </div>
-                        
+
                         <!-- 右上角小提示 -->
-                        <div class="absolute top-4 right-4 bg-[#4b5563]/80 backdrop-blur-sm p-3 rounded-xl text-xs text-white space-y-2 border border-white/10">
+                        <div class="absolute top-4 left-4 bg-[#4b5563]/80 backdrop-blur-sm p-3 rounded-xl text-xs text-white space-y-2 border border-white/10">
                             <div class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-[#22c55e]" id="poseDot"></span>身体追踪</div>
                             <div class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-[#3b82f6]" id="leftHandDot"></span>左手捕捉</div>
                             <div class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-[#a855f7]" id="rightHandDot"></span>右手捕捉</div>
@@ -429,17 +496,22 @@ const app = createApp({
 
                     <!-- 操作控制区 -->
                     <div class="mt-5 flex flex-col gap-3 shrink-0">
-                        <button id="recordBtn" @click="toggleRecording" :disabled="!cameraStarted" 
-                                class="w-full py-3.5 rounded-xl font-bold text-base text-white transition-all shadow-sm flex justify-center items-center gap-2"
-                                :class="agent.isRecording ? 'bg-[#ef4444] hover:bg-[#dc2626] animate-pulse' : 'bg-[#22c55e] hover:bg-[#16a34a]'">
-                            <span :class="agent.isRecording ? 'bg-white rounded-sm w-3 h-3 block' : 'bg-white rounded-full w-3 h-3 block'"></span>
-                            {{ agent.isRecording ? '结束本段动作' : '按下开始比划' }}
+                        <!-- 连续识别模式切换 -->
+                        <button v-if="!continuousActive" @click="startContinuousRecognition" :disabled="!cameraStarted"
+                                class="w-full py-3.5 rounded-xl font-bold text-base text-white transition-all shadow-sm bg-gradient-to-r from-[#3b82f6] to-[#2563eb] hover:from-[#2563eb] hover:to-[#1d4ed8] disabled:opacity-50 disabled:cursor-not-allowed flex justify-center items-center gap-2">
+                            <span class="text-xl">🤟</span>
+                            开启连续识别
                         </button>
-                        
+                        <button v-else @click="stopContinuousRecognition"
+                                class="w-full py-3.5 rounded-xl font-bold text-base text-white transition-all shadow-sm bg-gradient-to-r from-[#ef4444] to-[#dc2626] hover:from-[#dc2626] hover:to-[#b91c1c] flex justify-center items-center gap-2">
+                            <span class="text-xl">⏹</span>
+                            暂停识别
+                        </button>
+
                         <div class="bg-white border border-[#e2e8f0] rounded-xl p-3.5 flex items-center gap-3 shadow-sm">
                             <div class="relative flex h-2.5 w-2.5">
-                              <span v-if="cameraStarted && !agent.isRecording" class="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#3b82f6] opacity-75"></span>
-                              <span class="relative inline-flex rounded-full h-2.5 w-2.5" :class="cameraStarted ? (agent.isRecording ? 'bg-[#ef4444]' : 'bg-[#3b82f6]') : 'bg-gray-300'"></span>
+                              <span v-if="continuousActive" class="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#22c55e] opacity-75"></span>
+                              <span class="relative inline-flex rounded-full h-2.5 w-2.5" :class="cameraStarted ? (continuousActive ? 'bg-[#22c55e]' : 'bg-[#3b82f6]') : 'bg-gray-300'"></span>
                             </div>
                             <span class="text-sm font-medium text-gray-600">{{ statusText }}</span>
                         </div>
@@ -520,22 +592,27 @@ const app = createApp({
                         <!-- 手语组合板区 -->
                         <div>
                             <div class="flex justify-between items-end mb-2.5">
-                                <span class="text-sm font-bold text-gray-800">我的手语组合板：</span>
-                                <button v-if="vueWordSequence.length > 0" @click="clearSequence" class="text-xs text-gray-400 hover:text-red-500 transition-colors">清空重来</button>
+                                <span class="text-sm font-bold text-gray-800">📝 手语识别结果</span>
+                                <button v-if="continuousWords.length > 0" @click="clearContinuousWords" class="text-xs text-gray-400 hover:text-red-500 transition-colors">清空</button>
                             </div>
-                            
-                            <div class="min-h-[60px] bg-[#f8fafc] border border-[#e2e8f0] rounded-xl p-3 flex flex-wrap gap-2 items-center mb-4 shadow-inner">
-                                <span v-if="vueWordSequence.length === 0" class="text-sm text-gray-400 px-2 italic">点头确认后的词语会在这里排队...</span>
-                                <span v-for="(word, idx) in vueWordSequence" :key="idx" 
-                                      class="bg-[#e0e7ff] text-[#4338ca] border border-[#c7d2fe] px-3.5 py-1.5 rounded-lg text-sm font-medium flex items-center gap-1 shadow-sm">
+
+                            <!-- 统一显示识别结果 - 与挂号界面一致，支持删除 -->
+                            <div class="min-h-[60px] rounded-xl p-3 flex flex-wrap gap-2 items-center mb-4 shadow-inner transition-all"
+                                 :class="continuousWords.length > 0 ? 'bg-green-50 border-2 border-green-300' : 'bg-gray-50 border border-gray-100'">
+                                <span v-if="continuousWords.length === 0" class="text-sm text-gray-400 px-2 italic">
+                                    {{ continuousActive ? '连续识别中，识别到的词汇将实时显示...' : '点击"开启连续识别"开始比划手语' }}
+                                </span>
+                                <span v-for="(word, idx) in continuousWords" :key="idx"
+                                      class="bg-green-500 text-white px-3 py-1.5 rounded-full text-sm font-medium shadow-sm animate-fade-in relative group cursor-pointer"
+                                      @click="removeWord(idx)">
                                     {{ word }}
-                                    <button @click="agent.deleteWord(idx)" class="ml-1 text-[#4338ca] hover:text-[#dc2626] font-bold leading-none text-base transition-colors">&times;</button>
+                                    <span class="absolute -top-1 -right-1 w-4 h-4 bg-red-500 rounded-full flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 transition-opacity">×</span>
                                 </span>
                             </div>
 
-                            <button @click="polishAndSend" :disabled="vueWordSequence.length === 0 || isPolishing"
+                            <button @click="polishAndSend" :disabled="continuousWords.length === 0 || isPolishing"
                                     class="w-full py-3.5 rounded-xl font-bold text-white text-[17px] transition-all shadow-md flex justify-center items-center gap-2"
-                                    :class="vueWordSequence.length === 0 ? 'bg-[#cbd5e1] cursor-not-allowed' : 'bg-gradient-to-r from-[#fb923c] to-[#f97316] hover:from-[#f97316] hover:to-[#ea580c] hover:-translate-y-0.5'">
+                                    :class="continuousWords.length === 0 ? 'bg-[#cbd5e1] cursor-not-allowed' : 'bg-gradient-to-r from-[#fb923c] to-[#f97316] hover:from-[#f97316] hover:to-[#ea580c] hover:-translate-y-0.5'">
                                 <span v-if="isPolishing" class="animate-spin text-xl leading-none">⚙</span>
                                 <span v-else class="text-xl leading-none">✨</span>
                                 {{ isPolishing ? 'Agent 正在进行翻译与提炼...' : 'AI 润色成句并发送给医生' }}
@@ -558,6 +635,13 @@ const app = createApp({
             @keyframes fadeInUp {
                 from { opacity: 0; transform: translate(-50%, 5px); }
                 to { opacity: 1; transform: translate(-50%, 0); }
+            }
+            .animate-fade-in {
+                animation: fadeIn 0.3s ease-out forwards;
+            }
+            @keyframes fadeIn {
+                from { opacity: 0; transform: scale(0.9); }
+                to { opacity: 1; transform: scale(1); }
             }
         </style>
     `

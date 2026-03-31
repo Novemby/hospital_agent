@@ -136,6 +136,7 @@ function addMessage(patientId, message) {
         if (!patient.messages) patient.messages = [];
         patient.messages.push({
             id: Date.now(),
+            created_at: Date.now(),
             ...message
         });
         upsertPatient(patient);
