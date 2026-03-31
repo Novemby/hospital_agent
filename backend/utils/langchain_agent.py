@@ -161,7 +161,7 @@ class SmartHospitalAgent:
     # --------------------------------------------------------------------------
     # 阶段二：诊间面诊阶段 (Consultation Stage) - 🌟 化身为静默病历书记员
     # --------------------------------------------------------------------------
-    def consultation_stage_polish(self, words: List[str], context: str) -> Dict[str, str]:
+    def consultation_stage_polish(self, words: List[str], context: str, patient_profile: str = "") -> Dict[str, str]:
         fallback_res = {"polished_text": "，".join(words), "objective_summary": ""}
         if not self.llm or not JsonOutputParser:
             return fallback_res
@@ -171,22 +171,25 @@ class SmartHospitalAgent:
             template=(
                 "你是三甲医院的统一智慧医疗 Agent，当前处于【诊间面诊同传阶段】。\n"
                 "患者是聋哑人，现在正坐在医生面前面诊。\n"
-                "这是最近的医患聊天记录上下文：\n"
+                "【系统注入的患者长期记忆 (LTM)】\n"
+                "=====\n{patient_profile}\n=====\n\n"
+                "【系统注入的当前短期记忆 (STM - 今日对话)】\n"
                 "=====\n{context}\n=====\n\n"
                 "患者刚才比划了以下几个零碎的手语词汇：{words}\n\n"
                 "【Agent 核心任务】\n"
-                "1. 翻译润色 (polished_text)：结合医生的上下文，将患者的手语词汇翻译成一句通顺的、患者视角的礼貌回复。绝不能捏造病情！\n"
-                "2. 病历提炼 (objective_summary)：作为静默书记员，客观提炼当前对话暴露的症状事实（如：'头痛3天，伴发热'）。绝不能给出任何诊断、排查建议或用药指导！这是为了帮医生省去写病历的时间。若无实质症状信息，输出空字符串。\n"
+                "1. 翻译润色 (polished_text)：结合【短期记忆】中的上下文，将患者的手语翻译成通顺的自然语言。若【长期记忆】显示患者有过敏史或特殊情况，翻译时可适当体现自我保护意识。\n"
+                "2. 病历提炼 (objective_summary)：作为静默书记员，客观提炼当前症状。若发现患者的症状与【长期记忆】（如过敏史）存在极高风险关联，必须在此字段进行醒目预警！若无异常，提炼客观事实即可。\n"
                 "\n必须严格按照 JSON 格式输出：\n{format_instructions}"
             ),
-            input_variables=["context", "words"],
+            input_variables=["context", "words", "patient_profile"],
             partial_variables={"format_instructions": parser.get_format_instructions()},
         )
 
         try:
             result = (prompt | self.llm | parser).invoke({
-                "context": context or "无上下文",
-                "words": "、".join(words)
+                "context": context or "无短期记忆",
+                "words": "、".join(words),
+                "patient_profile": patient_profile or "无特殊既往史"
             })
             return result
         except Exception as e:
@@ -194,36 +197,33 @@ class SmartHospitalAgent:
             return fallback_res
 
     # --------------------------------------------------------------------------
-    # 阶段三：划词术语解释 (Term Explanation) - 🌟 接入大模型医学百科
+    # 阶段四：记忆沉淀与固化 (Memory Consolidation) - 🌟 诊后总结，存入长期记忆
     # --------------------------------------------------------------------------
-    def explain_medical_term(self, term: str, context: str) -> str:
+    def consolidate_memory(self, chat_history: str) -> str:
         if not self.llm:
-            return f"系统提示：当前网络未连接，无法解释术语【{term}】。"
+            return "无网络，未能生成总结"
 
         prompt = PromptTemplate(
             template=(
-                "你是三甲医院的专业医疗助手。患者在面诊过程中，对医生提到的术语【{term}】感到困惑。\n"
-                "这是他们当时的对话上下文：\n"
-                "=====\n{context}\n=====\n\n"
+                "你是三甲医院的智慧医疗 Agent。现在该患者的本次面诊已结束。\n"
+                "这是刚才医患之间的完整对话记录：\n"
+                "=====\n{chat_history}\n=====\n\n"
                 "【任务】\n"
-                "请用非常通俗、易懂、温暖的大白话（就像向毫无医学背景的老年人解释一样）来解释这个术语。\n"
+                "请提炼出高度精简的【本次就诊核心记忆】，作为该患者的长期记忆档案存入数据库。\n"
                 "要求：\n"
-                "1. 消除患者的恐惧感。\n"
-                "2. 字数尽量控制在 100-150 字左右。\n"
-                "3. 只输出解释内容，不要加任何诸如'好的'之类的客套话。"
+                "1. 必须包含：主要症状、医生最终意见、关键用药或检查。\n"
+                "2. 极其精简，不要超过 100 个字。\n"
+                "3. 纯客观陈述，例如：'患者因头痛发热就诊，医生排除了XX，建议做脑部CT，嘱咐多休息'。\n"
             ),
-            input_variables=["term", "context"]
+            input_variables=["chat_history"]
         )
 
         try:
-            result = (prompt | self.llm).invoke({
-                "term": term,
-                "context": context or "无上下文"
-            })
+            result = (prompt | self.llm).invoke({"chat_history": chat_history or "无对话"})
             return result.content.strip()
         except Exception as e:
-            print(f"❌ 术语解释异常: {e}")
-            return f"抱歉，系统暂时无法解释该术语【{term}】。"
+            print(f"❌ 记忆沉淀异常: {e}")
+            return "记忆总结生成失败"
 
 
 # 全局单例实例化，确保整个系统运行期间是“同一个 Agent”

@@ -4,6 +4,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
+from sqlalchemy import text
 
 from backend import crud, schemas
 from backend.config import settings
@@ -117,7 +118,8 @@ def registration_agent_chat(payload: schemas.RegistrationAgentChatRequest, db: S
                                            "collect_symptom")
 
     # 1. 🌟 调用同一个 Agent，执行【分诊阶段】任务
-    decision = unified_medical_agent.triage_stage_understand(text, session.get("slots", {}), session.get("symptom_struct", {}))
+    decision = unified_medical_agent.triage_stage_understand(text, session.get("slots", {}),
+                                                             session.get("symptom_struct", {}))
 
     # 2. 动态更新科室
     current_department = session["slots"].get("department")
@@ -272,14 +274,38 @@ def registration_agent_chat(payload: schemas.RegistrationAgentChatRequest, db: S
 # 🌟 新增端点：供前端面诊阶段 (handsign_assist.js) 调用
 # ===========================================================================
 class PolishRequest(BaseModel):
+    patient_id: int
     words: List[str]
     context: str
 
+
 @router.post("/consultation/polish")
-def polish_consultation_words(req: PolishRequest):
-    # 🌟 调用同一个 Agent，执行【面诊阶段】任务，现在它会返回包含了 insight 的字典
-    agent_result = unified_medical_agent.consultation_stage_polish(req.words, req.context)
+def polish_consultation_words(req: PolishRequest, db: Session = Depends(get_db)):
+    # 🌟 构建长期记忆 (Long-Term Memory)
+    patient_profile = "未知"
+    try:
+        patient = crud.get_patient_by_id(db, req.patient_id)
+        if patient:
+            gender_str = "男" if patient.gender == 1 else "女"
+            allergy = patient.allergy_history or "无"
+
+            # 🌟 闭环：从数据库的 ai_agent_memory 表中提取过往的记忆区块！
+            memories = db.execute(
+                text("SELECT ai_summary FROM ai_agent_memory WHERE patient_id = :pid ORDER BY created_at DESC LIMIT 3"),
+                {"pid": req.patient_id}
+            ).fetchall()
+
+            past_history = "、".join([m[0] for m in memories]) if memories else "无历史就诊记录"
+
+            # 将固有属性和过往记忆融合，注入大模型 LTM
+            patient_profile = f"患者姓名：{patient.name}，性别：{gender_str}，过敏史：{allergy}。\n【历史就诊核心记忆】：{past_history}"
+    except Exception as e:
+        print(f"提取患者长期记忆失败: {e}")
+
+    # 🌟 调用同一个 Agent，执行【面诊阶段】任务
+    agent_result = unified_medical_agent.consultation_stage_polish(req.words, req.context, patient_profile)
     return agent_result
+
 
 # ===========================================================================
 # 🌟 新增端点：划词术语解释 API
@@ -288,8 +314,49 @@ class ExplainRequest(BaseModel):
     term: str
     context: str = ""
 
+
 @router.post("/consultation/explain")
 def explain_medical_term(req: ExplainRequest):
-    # 调用大模型生成基于上下文的解释
     explanation = unified_medical_agent.explain_medical_term(req.term, req.context)
     return {"explanation": explanation}
+
+
+# ===========================================================================
+# 🌟 新增端点：就诊结束时的记忆沉淀 API (Memory Consolidation)
+# ===========================================================================
+class ConsolidateRequest(BaseModel):
+    patient_id: int
+    chat_history: str
+
+
+@router.post("/memory/consolidate")
+def consolidate_patient_memory(req: ConsolidateRequest, db: Session = Depends(get_db)):
+    if not req.chat_history.strip():
+        return {"message": "无对话记录，无需沉淀"}
+
+    # 1. 呼叫 Agent 大脑，对整场沟通进行核心摘要
+    summary = unified_medical_agent.consolidate_memory(req.chat_history)
+
+    # 2. 将提炼的精华记忆落盘到数据库的 `ai_agent_memory` 表
+    try:
+        # 获取最近的一条挂号记录，防止外键约束报错
+        latest_reg = db.execute(
+            text("SELECT id FROM biz_registration WHERE patient_id = :pid ORDER BY created_at DESC LIMIT 1"),
+            {"pid": req.patient_id}
+        ).fetchone()
+        reg_id = latest_reg[0] if latest_reg else 10001
+
+        db.execute(
+            text("""
+            INSERT INTO ai_agent_memory (patient_id, registration_id, session_id, ai_summary) 
+            VALUES (:pid, :reg_id, :sid, :summary)
+            """),
+            {"pid": req.patient_id, "reg_id": reg_id, "sid": f"session_{req.patient_id}", "summary": summary}
+        )
+        db.commit()
+        print(f"✅ 记忆已固化落盘: {summary}")
+    except Exception as e:
+        db.rollback()
+        print(f"❌ 记忆落盘失败: {e}")
+
+    return {"message": "记忆已沉淀", "summary": summary}
