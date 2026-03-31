@@ -1,10 +1,10 @@
 import os
+import json
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
 try:
     from dotenv import load_dotenv
-
     load_dotenv()
 except ImportError:
     pass
@@ -23,16 +23,52 @@ except Exception as e:
     PromptTemplate = None
     ChatOpenAI = None
 
+# ==============================================================================
+# 🌟 新增：Agent 长期记忆流 (Long-Term Memory Stream) 结构化定义
+# 完全按照你的设计，分为：就诊历史、健康特征、风险记录、面诊摘要、行为偏好
+# ==============================================================================
+class VisitHistoryItem(BaseModel):
+    date: str
+    symptoms: List[str]
+    department: str
+    risk_level: str = Field(description="枚举: NORMAL, HIGH, CRITICAL")
 
+class HealthProfile(BaseModel):
+    chronic_conditions: List[str]
+    frequent_symptoms: List[str]
+    risk_flags: List[str]
+
+class RiskHistoryItem(BaseModel):
+    symptom: str
+    date: str
+    level: str = Field(description="枚举: HIGH, CRITICAL")
+
+class ConsultationSummaryItem(BaseModel):
+    chief_complaint: str
+    assessment: str
+    recommendations: List[str]
+
+class Preferences(BaseModel):
+    preferred_department: str
+    communication_style: str
+
+class AgentStructuredMemory(BaseModel):
+    visit_history: List[VisitHistoryItem]
+    health_profile: HealthProfile
+    risk_history: List[RiskHistoryItem]
+    consultation_summary: List[ConsultationSummaryItem]
+    preferences: Preferences
+
+# ==============================================================================
+# 其它基础结构体
+# ==============================================================================
 class SymptomStruct(BaseModel):
-    primary_symptom: Optional[str] = Field(default=None,
-                                           description="最主要的不适感受（如'头晕','头痛','发热','胸闷'等）。只要患者表达了不适，此项绝不能为null！")
-    body_part: Optional[str] = Field(default=None, description="具体身体部位及方位，如'左肩', '右上腹'")
-    duration: Optional[str] = Field(default=None, description="持续时间，如'1天内', '1周', '几个月'")
-    severity: Optional[str] = Field(default=None, description="严重程度描述，如'轻微', '剧烈'")
-    accompanying_symptoms: List[str] = Field(default_factory=list, description="伴随的其他症状列表")
-    original_text: Optional[str] = Field(default=None, description="将用户本次和历史输入的关于症状的原话完整拼接保留")
-
+    primary_symptom: Optional[str] = Field(default=None)
+    body_part: Optional[str] = Field(default=None)
+    duration: Optional[str] = Field(default=None)
+    severity: Optional[str] = Field(default=None)
+    accompanying_symptoms: List[str] = Field(default_factory=list)
+    original_text: Optional[str] = Field(default=None)
 
 class HybridAgentDecision(BaseModel):
     intent: str = Field(default="register")
@@ -46,185 +82,133 @@ class HybridAgentDecision(BaseModel):
     triage_symptoms: Optional[str] = None
     symptom_struct: SymptomStruct = Field(default_factory=SymptomStruct)
 
-
-# 🌟 重构：将面诊阶段的输出改为“客观事实提炼”
 class ConsultationOutput(BaseModel):
     polished_text: str = Field(description="结合语境润色后的通顺患者自然语言")
-    objective_summary: str = Field(default="",
-                                   description="【静默书记员能力】客观提炼当前对话中暴露的症状、病程等事实，用于辅助医生书写病历（例如：'头痛3天，伴发热'）。绝不能给出任何诊断或用药建议！如果没有实质性医疗信息，返回空字符串。")
-
+    objective_summary: str = Field(default="", description="客观提炼症状用于辅助病历，不包含任何风险警告或诊断建议。")
 
 def _fallback_analyze(text: str) -> Dict[str, Any]:
-    lower_text = text.lower()
-    return {
-        "intent": "confirm" if ("确认" in text or lower_text in ["ok", "yes", "y"]) else "register",
-        "department": detect_department(text),
-        "date": detect_date(text),
-        "confirm": ("确认" in text or lower_text in ["ok", "yes", "y"]),
-        "triage_symptoms": text if text else None,
-    }
-
+    return {"intent": "register", "department": detect_department(text), "date": detect_date(text), "confirm": False, "triage_symptoms": text}
 
 class SmartHospitalAgent:
     def __init__(self):
-        """初始化同一个智能体大脑"""
         self.api_key = os.getenv("OPENAI_API_KEY")
         self.llm = self._init_llm()
 
     def _init_llm(self) -> Optional["ChatOpenAI"]:
-        if not self.api_key or not ChatOpenAI:
-            return None
-        return ChatOpenAI(
-            model=os.getenv("LC_MODEL", "deepseek-chat"),
-            temperature=0.1,  # 降低温度，保证各阶段输出稳定性
-            api_key=self.api_key,
-            base_url=os.getenv("OPENAI_BASE_URL", "https://api.deepseek.com"),
-        )
+        if not self.api_key or not ChatOpenAI: return None
+        return ChatOpenAI(model=os.getenv("LC_MODEL", "deepseek-chat"), temperature=0.1, api_key=self.api_key, base_url=os.getenv("OPENAI_BASE_URL", "https://api.deepseek.com"))
 
     # --------------------------------------------------------------------------
-    # 阶段一：挂号分诊阶段 (Triage Stage)
+    # 阶段一：挂号分诊 (融入结构化长期记忆)
     # --------------------------------------------------------------------------
-    def triage_stage_understand(self, text: str, known_slots: Dict[str, Any],
-                                known_symptom: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        fallback = {
-            "intent": "register",
-            "department": detect_department(text),
-            "date": detect_date(text),
-            "period": None,
-            "confirm": ("确认" in text or text.lower() in ["ok", "yes", "y"]),
-            "recommended_department": detect_department(text),
-            "missing_fields": [],
-            "strategy": "collect_missing_info",
-            "triage_symptoms": text,
-            "symptom_struct": {
-                "primary_symptom": None, "body_part": None, "duration": None,
-                "severity": None, "accompanying_symptoms": [], "original_text": text,
-            },
-        }
-
-        if not text or not self.llm or not JsonOutputParser:
-            return fallback
+    def triage_stage_understand(self, text: str, known_slots: Dict[str, Any], known_symptom: Optional[Dict[str, Any]] = None, patient_profile: str = "{}") -> Dict[str, Any]:
+        fallback = _fallback_analyze(text)
+        fallback["missing_fields"] = []
+        fallback["strategy"] = "collect_missing_info"
+        fallback["symptom_struct"] = {"primary_symptom": None, "body_part": None, "duration": None, "severity": None, "accompanying_symptoms": [], "original_text": text}
+        if not text or not self.llm or not JsonOutputParser: return fallback
 
         parser = JsonOutputParser(pydantic_object=HybridAgentDecision)
         prompt = PromptTemplate(
             template=(
-                "你是三甲医院的统一智慧医疗 Agent，当前处于【大厅挂号分诊阶段】。\n"
-                "今天日期: {today}\n"
-                "可用科室白名单: {departments}\n"
-                "当前已知槽位: {known_slots}\n"
-                "当前已知症状结构: {known_symptom}\n"
+                "你是三甲医院的智慧医疗分诊 Agent。\n"
+                "【患者长期的结构化健康画像 (JSON)】:\n{patient_profile}\n\n"
                 "用户最新输入: {text}\n"
                 "【核心任务】\n"
-                "1. 推断意图与科室。如果只有症状，推荐最合适白名单科室。\n"
-                "2. 精准提取 symptom_struct 字段。只要表达了身体不适，primary_symptom 绝不能为null！保留原话。\n"
-                "3. 绝对不允许捏造症状。\n"
+                "1. 结合长期画像推断意图。例如用户只说了'又疼了'，你需要去画像的'frequent_symptoms'或'chronic_conditions'里寻找部位，推荐对应科室。\n"
+                "2. 提取 symptom_struct。如果语意模糊，参考长期画像补全。\n"
                 "只输出合法的 JSON。\n{format_instructions}"
             ),
-            input_variables=["today", "departments", "known_slots", "known_symptom", "text"],
+            input_variables=["patient_profile", "text"],
             partial_variables={"format_instructions": parser.get_format_instructions()},
         )
 
         try:
-            result = (prompt | self.llm | parser).invoke({
-                "today": datetime.now().strftime("%Y-%m-%d"),
-                "departments": "、".join(settings.DEPARTMENTS),
-                "known_slots": str(known_slots or {}),
-                "known_symptom": str(known_symptom or {}),
-                "text": text,
-            })
-
+            result = (prompt | self.llm | parser).invoke({"patient_profile": patient_profile, "text": text})
+            # 处理日期等省略
             date = result.get("date")
-            if date == "今天":
-                date = datetime.now().strftime("%Y-%m-%d")
-            elif date == "明天":
-                date = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
-
-            out = {
-                "intent": result.get("intent") or "register",
-                "department": result.get("department"),
-                "date": date,
-                "period": result.get("period"),
-                "confirm": bool(result.get("confirm", False)),
-                "recommended_department": result.get("recommended_department"),
-                "missing_fields": result.get("missing_fields") or [],
-                "strategy": result.get("strategy") or "collect_missing_info",
-                "triage_symptoms": result.get("triage_symptoms") or text,
-                "symptom_struct": result.get("symptom_struct") or fallback["symptom_struct"],
-            }
-            if out["department"] not in settings.DEPARTMENTS: out["department"] = None
-            if out["recommended_department"] not in settings.DEPARTMENTS: out["recommended_department"] = None
+            if date == "今天": date = datetime.now().strftime("%Y-%m-%d")
+            elif date == "明天": date = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
+            out = { **fallback, **result, "date": date }
             return out
         except Exception as e:
-            print(f"❌ 分诊阶段 Agent 解析异常: {e}")
+            print(f"❌ 分诊 Agent 异常: {e}")
             return fallback
 
     # --------------------------------------------------------------------------
-    # 阶段二：诊间面诊阶段 (Consultation Stage) - 🌟 化身为静默病历书记员
+    # 阶段二：面诊同传 (融入结构化长期记忆，且静默不报警)
     # --------------------------------------------------------------------------
-    def consultation_stage_polish(self, words: List[str], context: str, patient_profile: str = "") -> Dict[str, str]:
+    def consultation_stage_polish(self, words: List[str], context: str, patient_profile: str = "{}") -> Dict[str, str]:
         fallback_res = {"polished_text": "，".join(words), "objective_summary": ""}
-        if not self.llm or not JsonOutputParser:
-            return fallback_res
+        if not self.llm or not JsonOutputParser: return fallback_res
 
         parser = JsonOutputParser(pydantic_object=ConsultationOutput)
         prompt = PromptTemplate(
             template=(
-                "你是三甲医院的统一智慧医疗 Agent，当前处于【诊间面诊同传阶段】。\n"
-                "患者是聋哑人，现在正坐在医生面前面诊。\n"
-                "【系统注入的患者长期记忆 (LTM)】\n"
-                "=====\n{patient_profile}\n=====\n\n"
-                "【系统注入的当前短期记忆 (STM - 今日对话)】\n"
-                "=====\n{context}\n=====\n\n"
-                "患者刚才比划了以下几个零碎的手语词汇：{words}\n\n"
+                "你是三甲医院的智慧医疗 Agent，正在为聋哑患者做同声传译。\n"
+                "【患者长期的结构化健康画像 (JSON)】:\n{patient_profile}\n\n"
+                "【当前诊间对话上下文】:\n{context}\n\n"
+                "患者手语词汇：{words}\n\n"
                 "【Agent 核心任务】\n"
-                "1. 翻译润色 (polished_text)：结合【短期记忆】中的上下文，将患者的手语翻译成通顺的自然语言。若【长期记忆】显示患者有过敏史或特殊情况，翻译时可适当体现自我保护意识。\n"
-                "2. 病历提炼 (objective_summary)：作为静默书记员，客观提炼当前症状。若发现患者的症状与【长期记忆】（如过敏史）存在极高风险关联，必须在此字段进行醒目预警！若无异常，提炼客观事实即可。\n"
+                "1. 翻译润色 (polished_text)：结合画像和上下文翻译。若患者说'老毛病'，请根据画像中的 chronic_conditions 翻译出具体病名。\n"
+                "2. 病历提炼 (objective_summary)：作为静默辅助，客观提炼症状用于病历草稿。\n"
+                "⚠️ 绝对禁止在输出中包含针对医生的风险警告或教导！你只是个底层的理解引擎。\n"
                 "\n必须严格按照 JSON 格式输出：\n{format_instructions}"
             ),
             input_variables=["context", "words", "patient_profile"],
             partial_variables={"format_instructions": parser.get_format_instructions()},
         )
-
         try:
-            result = (prompt | self.llm | parser).invoke({
-                "context": context or "无短期记忆",
-                "words": "、".join(words),
-                "patient_profile": patient_profile or "无特殊既往史"
+            return (prompt | self.llm | parser).invoke({
+                "context": context or "无上下文", "words": "、".join(words), "patient_profile": patient_profile
             })
-            return result
         except Exception as e:
-            print(f"❌ 面诊阶段 Agent 解析异常: {e}")
+            print(f"❌ 面诊 Agent 异常: {e}")
             return fallback_res
 
     # --------------------------------------------------------------------------
-    # 阶段四：记忆沉淀与固化 (Memory Consolidation) - 🌟 诊后总结，存入长期记忆
+    # 阶段三：划词解释 (保持不变)
     # --------------------------------------------------------------------------
-    def consolidate_memory(self, chat_history: str) -> str:
-        if not self.llm:
-            return "无网络，未能生成总结"
+    def explain_medical_term(self, term: str, context: str) -> str:
+        if not self.llm: return "无法解释"
+        prompt = PromptTemplate(
+            template="请用大白话解释术语【{term}】，结合上下文：\n{context}\n字数100字左右，不加客套话。",
+            input_variables=["term", "context"]
+        )
+        try:
+            return (prompt | self.llm).invoke({"term": term, "context": context}).content.strip()
+        except: return "无法解释"
 
+    # --------------------------------------------------------------------------
+    # 阶段四：记忆固化 (Memory Consolidation) - 🌟 进化为 JSON 更新引擎
+    # --------------------------------------------------------------------------
+    def consolidate_memory(self, chat_history: str, old_memory: str = "{}") -> str:
+        if not self.llm or not JsonOutputParser: return "{}"
+
+        parser = JsonOutputParser(pydantic_object=AgentStructuredMemory)
         prompt = PromptTemplate(
             template=(
-                "你是三甲医院的智慧医疗 Agent。现在该患者的本次面诊已结束。\n"
-                "这是刚才医患之间的完整对话记录：\n"
-                "=====\n{chat_history}\n=====\n\n"
-                "【任务】\n"
-                "请提炼出高度精简的【本次就诊核心记忆】，作为该患者的长期记忆档案存入数据库。\n"
+                "你是医疗Agent的记忆管理中枢。患者本次就诊已结束。\n"
+                "【该患者以前的记忆画像 (JSON)】:\n{old_memory}\n\n"
+                "【本次就诊完整对话】:\n{chat_history}\n\n"
+                "【核心任务】\n"
+                "请将本次对话中暴露的病情、医生诊断、新症状等，**融入并更新**到患者的记忆画像中。\n"
                 "要求：\n"
-                "1. 必须包含：主要症状、医生最终意见、关键用药或检查。\n"
-                "2. 极其精简，不要超过 100 个字。\n"
-                "3. 纯客观陈述，例如：'患者因头痛发热就诊，医生排除了XX，建议做脑部CT，嘱咐多休息'。\n"
+                "1. 保留原有不可变的特征（如慢性病、历史风险）。\n"
+                "2. 在 visit_history 头部追加本次的记录（最多保留近5次）。\n"
+                "3. 将所有的总结和提取提炼成简短的结构化短语，绝对不存长文本！\n"
+                "4. 必须输出合法的 JSON。\n{format_instructions}"
             ),
-            input_variables=["chat_history"]
+            input_variables=["chat_history", "old_memory"],
+            partial_variables={"format_instructions": parser.get_format_instructions()},
         )
-
         try:
-            result = (prompt | self.llm).invoke({"chat_history": chat_history or "无对话"})
-            return result.content.strip()
+            result = (prompt | self.llm | parser).invoke({"chat_history": chat_history, "old_memory": old_memory})
+            # 将字典转换回 JSON 字符串存入数据库
+            return json.dumps(result, ensure_ascii=False)
         except Exception as e:
-            print(f"❌ 记忆沉淀异常: {e}")
-            return "记忆总结生成失败"
+            print(f"❌ 记忆固化异常: {e}")
+            return old_memory
 
-
-# 全局单例实例化，确保整个系统运行期间是“同一个 Agent”
+# 全局单例
 unified_medical_agent = SmartHospitalAgent()

@@ -19,6 +19,24 @@ router = APIRouter(prefix="/api/agent/register", tags=["agent"])
 DURATION_OPTIONS = ["今天刚开始", "1-3天", "超过1周", "很久了"]
 
 
+# ===========================================================================
+# 🌟 内部辅助函数：获取患者长期的 JSON 结构化画像 (新增)
+# ===========================================================================
+def _get_patient_json_profile(db: Session, patient_id: int) -> str:
+    # 先拿死数据（性别、过敏等硬性要求）
+    patient = crud.get_patient_by_id(db, patient_id)
+    base_info = f"患者基础信息 - 姓名:{patient.name}, 过敏史:{patient.allergy_history}" if patient else ""
+
+    # 获取最新的 JSON 画像
+    mem_record = db.execute(
+        text("SELECT ai_summary FROM ai_agent_memory WHERE patient_id = :pid ORDER BY created_at DESC LIMIT 1"),
+        {"pid": patient_id}
+    ).fetchone()
+
+    json_memory = mem_record[0] if mem_record and mem_record[0].startswith("{") else "{}"
+    return f"{base_info}\n【动态长期记忆】:\n{json_memory}"
+
+
 # 保留极简的兜底时段识别
 def _detect_period(text: str) -> Optional[str]:
     t = text.strip().lower()
@@ -117,9 +135,16 @@ def registration_agent_chat(payload: schemas.RegistrationAgentChatRequest, db: S
         return helpers.make_agent_response("好的，请重新描述你的症状，我会重新为你推荐科室。", session, ["symptom"], [],
                                            "collect_symptom")
 
-    # 1. 🌟 调用同一个 Agent，执行【分诊阶段】任务
-    decision = unified_medical_agent.triage_stage_understand(text, session.get("slots", {}),
-                                                             session.get("symptom_struct", {}))
+    # 🌟 核心升级：从数据库中提取该患者的长期的 JSON 画像
+    patient_profile = _get_patient_json_profile(db, payload.patient_id)
+
+    # 1. 🌟 调用同一个 Agent，执行【分诊阶段】任务，并传入长期记忆(patient_profile)
+    decision = unified_medical_agent.triage_stage_understand(
+        text,
+        session.get("slots", {}),
+        session.get("symptom_struct", {}),
+        patient_profile=patient_profile
+    )
 
     # 2. 动态更新科室
     current_department = session["slots"].get("department")
@@ -281,28 +306,10 @@ class PolishRequest(BaseModel):
 
 @router.post("/consultation/polish")
 def polish_consultation_words(req: PolishRequest, db: Session = Depends(get_db)):
-    # 🌟 构建长期记忆 (Long-Term Memory)
-    patient_profile = "未知"
-    try:
-        patient = crud.get_patient_by_id(db, req.patient_id)
-        if patient:
-            gender_str = "男" if patient.gender == 1 else "女"
-            allergy = patient.allergy_history or "无"
+    # 🌟 获取结构化 JSON 画像
+    patient_profile = _get_patient_json_profile(db, req.patient_id)
 
-            # 🌟 闭环：从数据库的 ai_agent_memory 表中提取过往的记忆区块！
-            memories = db.execute(
-                text("SELECT ai_summary FROM ai_agent_memory WHERE patient_id = :pid ORDER BY created_at DESC LIMIT 3"),
-                {"pid": req.patient_id}
-            ).fetchall()
-
-            past_history = "、".join([m[0] for m in memories]) if memories else "无历史就诊记录"
-
-            # 将固有属性和过往记忆融合，注入大模型 LTM
-            patient_profile = f"患者姓名：{patient.name}，性别：{gender_str}，过敏史：{allergy}。\n【历史就诊核心记忆】：{past_history}"
-    except Exception as e:
-        print(f"提取患者长期记忆失败: {e}")
-
-    # 🌟 调用同一个 Agent，执行【面诊阶段】任务
+    # 🌟 传入 Agent，执行翻译润色
     agent_result = unified_medical_agent.consultation_stage_polish(req.words, req.context, patient_profile)
     return agent_result
 
@@ -334,10 +341,17 @@ def consolidate_patient_memory(req: ConsolidateRequest, db: Session = Depends(ge
     if not req.chat_history.strip():
         return {"message": "无对话记录，无需沉淀"}
 
-    # 1. 呼叫 Agent 大脑，对整场沟通进行核心摘要
-    summary = unified_medical_agent.consolidate_memory(req.chat_history)
+    # 1. 取出老记忆
+    mem_record = db.execute(
+        text("SELECT ai_summary FROM ai_agent_memory WHERE patient_id = :pid ORDER BY created_at DESC LIMIT 1"),
+        {"pid": req.patient_id}
+    ).fetchone()
+    old_memory_json = mem_record[0] if mem_record and mem_record[0].startswith("{") else "{}"
 
-    # 2. 将提炼的精华记忆落盘到数据库的 `ai_agent_memory` 表
+    # 2. 呼叫 Agent，融合出全新的 JSON 画像
+    new_memory_json = unified_medical_agent.consolidate_memory(req.chat_history, old_memory_json)
+
+    # 3. 将提炼的精华记忆落盘到数据库的 `ai_agent_memory` 表
     try:
         # 获取最近的一条挂号记录，防止外键约束报错
         latest_reg = db.execute(
@@ -351,12 +365,12 @@ def consolidate_patient_memory(req: ConsolidateRequest, db: Session = Depends(ge
             INSERT INTO ai_agent_memory (patient_id, registration_id, session_id, ai_summary) 
             VALUES (:pid, :reg_id, :sid, :summary)
             """),
-            {"pid": req.patient_id, "reg_id": reg_id, "sid": f"session_{req.patient_id}", "summary": summary}
+            {"pid": req.patient_id, "reg_id": reg_id, "sid": f"session_{req.patient_id}", "summary": new_memory_json}
         )
         db.commit()
-        print(f"✅ 记忆已固化落盘: {summary}")
+        print(f"✅ 结构化记忆已更新并落盘!")
     except Exception as e:
         db.rollback()
         print(f"❌ 记忆落盘失败: {e}")
 
-    return {"message": "记忆已沉淀", "summary": summary}
+    return {"message": "记忆已沉淀", "summary": new_memory_json}
