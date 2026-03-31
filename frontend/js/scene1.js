@@ -224,6 +224,7 @@ const app = createApp({
                         dept: '',
                         allergy: backendData.allergy_history || '未记录',
                         medicalHistory: '',
+                        diagnosis: '',
                         prescriptions: [],
                         messages: []
                     };

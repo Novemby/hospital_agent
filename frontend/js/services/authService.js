@@ -73,8 +73,9 @@ export function setCurrentDoctor(doctorData) {
             ...doctorData,
             // 统一使用 dept 字段，优先使用 doctorData.dept，否则用 doctorData.department
             dept: doctorData.dept || doctorData.department,
-            // 保留原始 id 字段（可能为 work_no 或 id）
-            id: doctorData.work_no || doctorData.id
+            // 同时保留数据库主键 id 和工号 work_no，避免后续落库时丢失医生真实 ID
+            id: doctorData.id,
+            work_no: doctorData.work_no
         };
         sessionStorage.setItem(STORAGE_DOCTOR, JSON.stringify(doctorToStore));
     } else {

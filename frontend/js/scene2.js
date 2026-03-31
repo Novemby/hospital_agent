@@ -7,13 +7,14 @@ const app = createApp({
     setup() {
         // ========== 1. 基础状态 (必须放在最前面) ==========
         const storedDoctor = getCurrentDoctor();
-        const doctorId = ref(storedDoctor ? storedDoctor.id : '');
+        const doctorId = ref(storedDoctor ? (storedDoctor.work_no || storedDoctor.id) : '');
         const doctorPwd = ref('');
         const view = ref(storedDoctor ? 'doctor-view' : 'login');
         const loginLoading = ref(false);
         const doctorDept = ref(storedDoctor ? (storedDoctor.dept || storedDoctor.department) : '');
         const patients = ref([]);
         const selectedPatientId = ref('');
+        let patientSyncInterval = null;
 
         // 🌟 核心修复：把 selectedPatient 挪到最上面！防止后面 computed 用到时报未初始化的错
         const selectedPatient = computed(() => {
@@ -154,6 +155,34 @@ const app = createApp({
             window.location.href = 'index.html';
         };
 
+        const syncAndLoadPatients = async (keepSelection = true) => {
+            if (doctorDept.value && typeof syncPatientsFromBackend === 'function') {
+                try {
+                    await syncPatientsFromBackend(doctorDept.value);
+                } catch (e) {
+                    console.warn('从后端同步患者失败', e);
+                }
+            }
+
+            const allPatients = getPatients();
+            const activePatients = allPatients.filter(p => !p.is_finished);
+            patients.value = doctorDept.value
+                ? activePatients.filter(p => p.dept === doctorDept.value)
+                : activePatients;
+
+            if (!patients.value.length) {
+                selectedPatientId.value = '';
+                return;
+            }
+
+            const hasSelectedPatient = keepSelection && patients.value.some(
+                p => String(p.id) === String(selectedPatientId.value)
+            );
+            if (!hasSelectedPatient) {
+                selectedPatientId.value = String(patients.value[0].id);
+            }
+        };
+
         const doctorLogin = async () => {
             if (!doctorId.value || !doctorPwd.value) {
                 alert('工号和密码不能为空');
@@ -165,18 +194,10 @@ const app = createApp({
                 setCurrentDoctor(doctorData);
                 doctorDept.value = doctorData.department || doctorData.dept || '全科';
 
-                // 增加容错保护
-                if (typeof syncPatientsFromBackend === 'function') {
-                    try { await syncPatientsFromBackend(doctorDept.value); } catch(e) { console.warn("从后端同步患者失败", e); }
-                }
-
                 view.value = 'doctor-view';
-                loadPatients();
-                if (patients.value.length > 0) {
-                    selectedPatientId.value = String(patients.value[0].id);
-                } else {
-                    selectedPatientId.value = '';
-                }
+                await syncAndLoadPatients(false);
+                if (patientSyncInterval) clearInterval(patientSyncInterval);
+                patientSyncInterval = window.setInterval(loadPatients, 15000);
             } catch (error) {
                 alert(error.message || '登录失败，请检查工号或密码');
             } finally {
@@ -190,21 +211,14 @@ const app = createApp({
             doctorPwd.value = '';
             doctorDept.value = '';
             view.value = 'login';
+            if (patientSyncInterval) clearInterval(patientSyncInterval);
+            patientSyncInterval = null;
             if (handsignWindow && !handsignWindow.closed) handsignWindow.close();
             if (windowCheckInterval) clearInterval(windowCheckInterval);
             isHandsignOpen.value = false;
         };
 
-        const loadPatients = () => {
-            const allPatients = getPatients();
-            const activePatients = allPatients.filter(p => !p.is_finished);
-
-            if (doctorDept.value) {
-                patients.value = activePatients.filter(p => p.dept === doctorDept.value);
-            } else {
-                patients.value = activePatients;
-            }
-        };
+        const loadPatients = () => syncAndLoadPatients(true);
 
         const handleStorageChange = (e) => {
             if (e.key === 'smart_hospital_patients' || e.key === null) {
@@ -214,11 +228,21 @@ const app = createApp({
 
         onMounted(() => {
             window.addEventListener('storage', handleStorageChange);
+            window.addEventListener('focus', loadPatients);
+            document.addEventListener('visibilitychange', loadPatients);
+
+            if (storedDoctor && doctorDept.value) {
+                loadPatients();
+                patientSyncInterval = window.setInterval(loadPatients, 15000);
+            }
         });
 
         onUnmounted(() => {
             window.removeEventListener('storage', handleStorageChange);
+            window.removeEventListener('focus', loadPatients);
+            document.removeEventListener('visibilitychange', loadPatients);
             if (windowCheckInterval) clearInterval(windowCheckInterval);
+            if (patientSyncInterval) clearInterval(patientSyncInterval);
             if (handsignWindow && !handsignWindow.closed) handsignWindow.close();
         });
 
@@ -232,11 +256,48 @@ const app = createApp({
             newRx.value = { drug: '', dosage: '', usage: '' };
         };
 
-        const saveMedicalHistory = () => {
+        // 🌟 核心升级：点击保存时，既更新本地缓存（0.01秒UI同步），也发送到后端真实落库
+        const saveMedicalHistory = async () => {
             if (selectedPatient.value) {
+                // 1. 乐观更新：先保存进本地缓存，让同电脑的患者大厅瞬间同步看到
                 selectedPatient.value.lastUpdated = new Date().toLocaleTimeString();
                 upsertPatient(selectedPatient.value);
-                alert('病历已保存');
+
+                // 2. 真实落盘：发给后端写进 MySQL
+                try {
+                    const currentDoctor = getCurrentDoctor();
+                    const response = await fetch(`http://localhost:8000/api/patients/${selectedPatient.value.id}/sync_record`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            medical_history: selectedPatient.value.medicalHistory || '',
+                            diagnosis: selectedPatient.value.diagnosis || '',
+                            prescriptions: selectedPatient.value.prescriptions || [],
+                            doctor_id: currentDoctor?.id || null
+                        })
+                    });
+                    const result = await response.json().catch(() => ({}));
+                    if (response.ok && result.success !== false) {
+                        alert('✅ 病历已保存，并成功落盘同步至数据库！');
+                    } else {
+                        const detail = result.detail || result.message || `HTTP ${response.status}`;
+                        alert(`⚠️ 本地缓存已更新，但同步数据库失败：${detail}`);
+                    }
+                } catch(e) {
+                    console.warn("同步数据库网络异常", e);
+                    alert('✅ 病历已暂存本地 (后端未连接，请检查 FastAPI 服务)');
+                }
+            }
+        };
+
+        const applyAiSummary = () => {
+            if (selectedPatient.value?.triage_struct?.primary_symptom) {
+                const summary = "【AI 辅助提炼】" + selectedPatient.value.triage_struct.primary_symptom;
+                const current = selectedPatient.value.medicalHistory || '';
+                // 如果还没填过，才追加进去，防止重复点击
+                if (!current.includes(summary)) {
+                    selectedPatient.value.medicalHistory = current ? current + '\n\n' + summary : summary;
+                }
             }
         };
 
@@ -335,6 +396,7 @@ const app = createApp({
             showAddPrescription, newRx,
             goToRoleSelect, doctorLogin, logout, selectPatient,
             saveMedicalHistory, finishConsultation, addPrescription, removePrescription,
+            applyAiSummary, // 🌟 暴露给模板
             openPatientAssist, backToDoctor,
             queryTerm,
             isHandsignOpen,
@@ -464,20 +526,32 @@ const app = createApp({
                         </div>
 
                         <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-                            
-                            <!-- 主工作区：病历与处方 -->
-                            <div :class="isHandsignOpen ? 'lg:col-span-7' : 'lg:col-span-12'" class="flex flex-col gap-6 transition-all duration-500">
-                                
-                                <!-- 病历记录区域 -->
-                                <div class="bg-white p-6 rounded-2xl shadow-sm">
-                                    <div class="flex justify-between items-center mb-3">
-                                        <h3 class="font-bold text-lg flex items-center gap-2"><span class="w-1.5 h-5 bg-blue-500 rounded-full"></span>病历记录与医嘱</h3>
-                                        <button @click="saveMedicalHistory" class="text-sm bg-green-50 text-green-600 px-4 py-1.5 rounded-full hover:bg-green-100 font-medium">保存当前病历</button>
-                                    </div>
-                                    <textarea v-model="selectedPatient.medicalHistory" :rows="isHandsignOpen ? 6 : 4" class="w-full border border-gray-200 rounded-xl p-3 text-sm focus:ring-2 focus:ring-blue-200 outline-none leading-relaxed transition-all resize-none"></textarea>
+                    
+                    <!-- 主工作区：病历与处方 -->
+                    <div :class="isHandsignOpen ? 'lg:col-span-7' : 'lg:col-span-12'" class="flex flex-col gap-6 transition-all duration-500">
+                        
+                        <!-- 病历记录区域 -->
+                        <div class="bg-white p-6 rounded-2xl shadow-sm">
+                            <div class="flex justify-between items-center mb-3">
+                                <h3 class="font-bold text-lg flex items-center gap-2"><span class="w-1.5 h-5 bg-blue-500 rounded-full"></span>病历记录与医嘱</h3>
+                                <div class="flex gap-2">
+                                    <!-- 🌟 只有当 AI 提炼了新内容时，才显示这个轻量级按钮 -->
+                                    <button v-if="selectedPatient?.triage_struct?.primary_symptom" @click="applyAiSummary" class="text-xs bg-indigo-50 text-indigo-600 border border-indigo-200 px-3 py-1.5 rounded-full hover:bg-indigo-100 font-medium flex items-center transition-colors">
+                                        ✨ 一键填入 AI 摘要
+                                    </button>
+                                    <button @click="saveMedicalHistory" class="text-sm bg-green-50 text-green-600 px-4 py-1.5 rounded-full hover:bg-green-100 font-medium transition-colors">
+                                        保存当前病历
+                                    </button>
                                 </div>
+                            </div>
+                            <textarea v-model="selectedPatient.medicalHistory" :rows="isHandsignOpen ? 6 : 4" class="w-full border border-gray-200 rounded-xl p-3 text-sm focus:ring-2 focus:ring-blue-200 outline-none leading-relaxed transition-all resize-none"></textarea>
+                            <div class="mt-4">
+                                <div class="text-sm text-gray-500 mb-2">临床诊断</div>
+                                <textarea v-model="selectedPatient.diagnosis" rows="2" class="w-full border border-gray-200 rounded-xl p-3 text-sm focus:ring-2 focus:ring-blue-200 outline-none leading-relaxed transition-all resize-none" placeholder="请输入明确诊断，例如：急性胃肠炎"></textarea>
+                            </div>
+                        </div>
 
-                                <!-- 处方管理区域 -->
+                        <!-- 处方管理区域 -->
                                 <div class="bg-white p-6 rounded-2xl shadow-sm relative">
                                     <div class="flex justify-between items-center mb-3">
                                         <h3 class="font-bold text-lg flex items-center gap-2"><span class="w-1.5 h-5 bg-green-500 rounded-full"></span>处方管理</h3>

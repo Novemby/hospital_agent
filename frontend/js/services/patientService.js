@@ -3,36 +3,7 @@ const STORAGE_KEY = 'smart_hospital_patients';
 const API_BASE_URL = 'http://localhost:8000/api';
 
 // 默认初始患者数据（仅作为后备，实际会被后端数据覆盖）
-const DEFAULT_PATIENTS = [
-    {
-        id: 'P001', name: '张三', isDeaf: true,
-        symptoms: '左边肩膀酸疼，手抬不起，持续一周',
-        dept: '骨科', allergy: '无',
-        medicalHistory: '初步诊断：肩周炎，建议拍X光片。',
-        prescriptions: [ { drug: '布洛芬', dosage: '200mg', usage: '每日两次' } ],
-        messages: [
-            { id: 1, type: 'pat', content: '医生您好，我的肩膀已经疼了一周了。' },
-            { id: 2, type: 'doc', content: '是活动时疼痛加重，还是休息时也疼？' },
-            { id: 3, type: 'pat', content: '抬手的时候特别疼，晚上睡觉有时也会疼醒。' }
-        ]
-    },
-    {
-        id: 'P002', name: '李四', isDeaf: false,
-        symptoms: '头痛、发热两天',
-        dept: '发热门诊', allergy: '青霉素',
-        medicalHistory: '疑似上呼吸道感染，建议查血常规。',
-        prescriptions: [ { drug: '对乙酰氨基酚', dosage: '500mg', usage: '发热时服用' } ],
-        messages: [ { id: 1, type: 'pat', content: '医生我发烧38.5度，头痛。' } ]
-    },
-    {
-        id: 'P003', name: '王五', isDeaf: false,
-        symptoms: '胃胀、反酸',
-        dept: '消化内科', allergy: '无',
-        medicalHistory: '胃炎？建议胃镜检查。',
-        prescriptions: [],
-        messages: [ { id: 1, type: 'pat', content: '吃完饭总是胃胀，有点反酸。' } ]
-    }
-];
+const DEFAULT_PATIENTS = [];
 
 /**
  * 计算年龄（基于出生日期）
@@ -61,6 +32,11 @@ function normalizePatient(patient) {
         isDeaf: patient.is_deaf,
         allergy: patient.allergy_history,
         triageStruct: patient.triage_struct || null,
+        diagnosis: patient.diagnosis || '',
+        prescriptions: Array.isArray(patient.prescriptions) ? patient.prescriptions : [],
+        messages: Array.isArray(patient.messages) ? patient.messages : [],
+        // 后端同步到医生端的列表本身就是当前待诊患者，必须清掉旧缓存里的“已结束”标记
+        is_finished: false,
     };
 }
 

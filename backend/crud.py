@@ -2,6 +2,7 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 from datetime import datetime, date
+from sqlalchemy import func
 from backend import models
 from .config import settings
 from fastapi import HTTPException
@@ -87,15 +88,26 @@ def get_patient_by_idcard(db: Session, id_card: str):
 def get_patient_by_id(db: Session, patient_id: int):
     return db.query(models.Patient).filter(models.Patient.id == patient_id).first()
 
-def get_patients_by_dept(db: Session, dept: str = None):
+def get_patients_by_dept(db: Session, dept: str = None, current_state: Optional[str] = "WAITING"):
+    latest_reg_subquery = db.query(
+        models.Registration.patient_id.label("patient_id"),
+        func.max(models.Registration.id).label("latest_registration_id"),
+    ).group_by(models.Registration.patient_id).subquery()
+
+    query = db.query(models.Patient, models.Registration).join(
+        latest_reg_subquery,
+        models.Patient.id == latest_reg_subquery.c.patient_id
+    ).join(
+        models.Registration,
+        models.Registration.id == latest_reg_subquery.c.latest_registration_id
+    )
+
     if dept:
-        patients = db.query(models.Patient).join(
-            models.Registration,
-            models.Patient.id == models.Registration.patient_id
-        ).filter(models.Registration.department == dept).distinct().all()
-    else:
-        patients = db.query(models.Patient).all()
-    return patients
+        query = query.filter(models.Registration.department == dept)
+    if current_state:
+        query = query.filter(models.Registration.current_state == current_state)
+
+    return query.order_by(models.Registration.created_at.desc(), models.Registration.id.desc()).all()
 
 def get_doctor_by_workno(db: Session, work_no: str):
     return db.query(models.Doctor).filter(models.Doctor.work_no == work_no).first()

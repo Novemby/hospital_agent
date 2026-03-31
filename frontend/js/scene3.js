@@ -1,7 +1,6 @@
 import { createApp, ref, computed, onMounted, onUnmounted } from 'vue';
-// 添加了 ?v=2 强制浏览器跳过旧缓存，读取最新文件
-import { getPatientById, upsertPatient } from './services/patientService.js?v=2';
-import { setCurrentPatient, getCurrentPatient, clearAuth, patientLoginAPI } from './services/authService.js?v=2';
+import { getPatientById, upsertPatient } from './services/patientService.js';
+import { setCurrentPatient, getCurrentPatient, clearAuth, patientLoginAPI } from './services/authService.js';
 
 const app = createApp({
     setup() {
@@ -16,9 +15,12 @@ const app = createApp({
         const showPaymentHistoryModal = ref(false);
         const showPrescriptionQueryModal = ref(false);
 
+        // 🌟 新增：存放从后端数据库查出来的真实病历和处方
+        const dbRecords = ref([]);
+        const loadingRecords = ref(false);
+
         const goToRoleSelect = () => { window.location.href = 'index.html'; };
 
-        // 增加 Try-Catch 防止单条数据损坏导致整个 computed 崩溃
         const currentPatientName = computed(() => {
             refreshKey.value;
             if (!currentId.value) return '';
@@ -30,15 +32,33 @@ const app = createApp({
             }
         });
 
-        const currentPatient = computed(() => {
-            refreshKey.value;
-            if (!currentId.value) return null;
+        // 🌟 新增：向后端请求真实的病历数据
+        const fetchPatientRecords = async () => {
+            if (!currentId.value) return;
+            loadingRecords.value = true;
             try {
-                return getPatientById(currentId.value);
+                const response = await fetch(`http://localhost:8000/api/patients/${currentId.value}/records`);
+                if (response.ok) {
+                    dbRecords.value = await response.json();
+                }
             } catch (e) {
-                return null;
+                console.error("获取病历失败", e);
+            } finally {
+                loadingRecords.value = false;
             }
-        });
+        };
+
+        // 🌟 新增：打开病历弹窗时触发请求
+        const openMedicalRecord = async () => {
+            showMedicalRecordModal.value = true;
+            await fetchPatientRecords();
+        };
+
+        // 🌟 新增：打开处方弹窗时触发请求
+        const openPrescription = async () => {
+            showPrescriptionQueryModal.value = true;
+            await fetchPatientRecords();
+        };
 
         const patientLogin = async () => {
             if (!idCardInput.value.trim()) return alert('请输入身份证号');
@@ -58,7 +78,7 @@ const app = createApp({
                         name: backendData.name,
                         isDeaf: backendData.is_deaf,
                         allergy: backendData.allergy_history,
-                        symptoms: '', dept: '', medicalHistory: '', prescriptions: [], messages: []
+                        symptoms: '', dept: '', medicalHistory: '', diagnosis: '', prescriptions: [], messages: []
                     };
                     try {
                         upsertPatient(patient);
@@ -80,6 +100,7 @@ const app = createApp({
             currentId.value = '';
             idCardInput.value = '';
             view.value = 'login';
+            dbRecords.value = []; // 清空数据
         };
 
         const handleStorageChange = (e) => {
@@ -89,11 +110,18 @@ const app = createApp({
         onMounted(() => { window.addEventListener('storage', handleStorageChange); });
         onUnmounted(() => { window.removeEventListener('storage', handleStorageChange); });
 
+        // 提取存在处方的记录
+        const hasPrescriptions = computed(() => {
+            return dbRecords.value.some(record => record.treatment_plan && record.treatment_plan.length > 0);
+        });
+
         return {
-            view, currentId, currentPatientName, currentPatient,
+            view, currentId, currentPatientName,
             idCardInput, showReportModal, showMedicalRecordModal,
             showPaymentHistoryModal, showPrescriptionQueryModal,
-            goToRoleSelect, patientLogin, logout
+            dbRecords, loadingRecords, hasPrescriptions,
+            goToRoleSelect, patientLogin, logout,
+            openMedicalRecord, openPrescription
         };
     },
     template: `
@@ -107,7 +135,6 @@ const app = createApp({
                         </div>
                         <h2 class="text-2xl font-bold">患者信息登录</h2>
                     </div>
-                    <!-- 更新了提示文案，匹配数据库中的张三数据 -->
                     <input v-model="idCardInput" type="text" placeholder="演示身份证: 123456 (张三)" class="w-full border-2 border-gray-100 p-3 rounded-xl mb-5 focus:border-purple-500 outline-none">
                     <button @click="patientLogin" class="w-full bg-purple-600 text-white py-3 rounded-xl font-bold hover:bg-purple-700">进入信息大厅</button>
                 </div>
@@ -138,7 +165,7 @@ const app = createApp({
                             <h3 class="font-bold text-green-700 mb-2">📄 报告查询</h3>
                             <p class="text-sm text-gray-600">化验单、影像报告</p>
                         </div>
-                        <div @click="showMedicalRecordModal = true" class="bg-purple-50 p-6 rounded-xl border border-purple-200 cursor-pointer hover:shadow-md transition">
+                        <div @click="openMedicalRecord" class="bg-purple-50 p-6 rounded-xl border border-purple-200 cursor-pointer hover:shadow-md transition">
                             <h3 class="font-bold text-purple-700 mb-2">📋 病历查询</h3>
                             <p class="text-sm text-gray-600">历史病历、诊断记录</p>
                         </div>
@@ -146,7 +173,7 @@ const app = createApp({
                             <h3 class="font-bold text-orange-700 mb-2">🧾 缴费记录</h3>
                             <p class="text-sm text-gray-600">历史缴费明细</p>
                         </div>
-                        <div @click="showPrescriptionQueryModal = true" class="bg-blue-50 p-6 rounded-xl border border-blue-200 cursor-pointer hover:shadow-md transition">
+                        <div @click="openPrescription" class="bg-blue-50 p-6 rounded-xl border border-blue-200 cursor-pointer hover:shadow-md transition">
                             <h3 class="font-bold text-blue-700 mb-2">💊 处方查询</h3>
                             <p class="text-sm text-gray-600">查看历史处方、药品详情</p>
                         </div>
@@ -158,87 +185,98 @@ const app = createApp({
                 </div>
             </div>
 
-            <!-- Modals 恢复为带详细内容的版本 -->
+            <!-- 报告查询 -->
             <div v-if="showReportModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" @click.self="showReportModal = false">
                 <div class="bg-white rounded-2xl p-6 max-w-md w-full m-4 shadow-2xl">
                     <h3 class="text-xl font-bold mb-4 flex items-center gap-2 text-green-700">
                         <span>📄 报告查询</span>
                         <span class="text-sm font-normal text-gray-500">患者：{{ currentPatientName || currentId }}</span>
                     </h3>
-                    <div class="space-y-3 max-h-80 overflow-y-auto">
-                        <div class="p-3 border border-green-200 rounded-lg hover:bg-green-50 cursor-pointer">
-                            <div class="flex justify-between items-center">
-                                <span class="font-medium">血常规报告</span>
-                                <span class="text-xs bg-green-100 text-green-800 px-2 py-1 rounded">已完成</span>
-                            </div>
-                            <div class="text-sm text-gray-500">检验科</div>
-                        </div>
-                        <div class="p-3 border border-yellow-200 rounded-lg hover:bg-yellow-50 cursor-pointer">
-                            <div class="flex justify-between items-center">
-                                <span class="font-medium">肝功能检查</span>
-                                <span class="text-xs bg-yellow-100 text-yellow-800 px-2 py-1 rounded">报告中</span>
-                            </div>
-                            <div class="text-sm text-gray-500">检验科</div>
-                        </div>
-                    </div>
+                    <div class="text-gray-400 text-center py-8">暂未接入真实检查报告数据</div>
                     <button @click="showReportModal = false" class="mt-4 w-full bg-gray-200 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-300">关闭</button>
                 </div>
             </div>
 
+            <!-- 🌟 核心：真实病历查询（动态遍历数据库） -->
             <div v-if="showMedicalRecordModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" @click.self="showMedicalRecordModal = false">
                 <div class="bg-white rounded-2xl p-6 max-w-md w-full m-4 shadow-2xl">
                     <h3 class="text-xl font-bold mb-4 flex items-center gap-2 text-purple-700">
-                        <span>📋 病历查询</span>
+                        <span>📋 历史病历</span>
                         <span class="text-sm font-normal text-gray-500">患者：{{ currentPatientName || currentId }}</span>
                     </h3>
-                    <div class="space-y-4 max-h-80 overflow-y-auto">
-                        <div class="border-l-4 border-purple-400 pl-3 py-1">
-                            <div class="font-medium">门诊记录</div>
-                            <div class="text-sm text-gray-600">主诉：左肩疼痛一周，活动受限</div>
-                            <div class="text-sm text-gray-600">诊断：肩周炎</div>
-                            <div class="text-xs text-gray-400 mt-1">医生：张伟</div>
+                    
+                    <div v-if="loadingRecords" class="text-center py-8 text-purple-500">正在从数据库拉取病历...</div>
+                    
+                    <div v-else class="space-y-4 max-h-80 overflow-y-auto">
+                        <div v-if="dbRecords.length === 0" class="text-gray-400 text-center py-8">
+                            暂无门诊病历记录
+                        </div>
+                        
+                        <!-- 动态循环渲染从数据库拿到的记录 -->
+                        <div v-for="(record, index) in dbRecords" :key="index" class="border-l-4 border-purple-400 pl-3 py-2 bg-purple-50/30 rounded-r-lg mb-3">
+                            <div class="flex justify-between items-center border-b border-purple-100 pb-1 mb-2">
+                                <span class="font-bold text-purple-800">{{ record.department }} 门诊记录</span>
+                                <span class="text-xs text-gray-500">{{ record.visit_date }}</span>
+                            </div>
+                            <div class="text-sm text-gray-700 mb-1">
+                                <span class="font-bold text-gray-500">主诉：</span>
+                                <span class="whitespace-pre-line">{{ record.chief_complaint || '未记录' }}</span>
+                            </div>
+                            <div class="text-sm text-gray-700 mb-1">
+                                <span class="font-bold text-gray-500">诊断：</span>
+                                <span>{{ record.diagnosis || '未记录' }}</span>
+                            </div>
+                            <div class="text-xs text-purple-600 mt-2 flex items-center gap-1">
+                                👨‍⚕️ 医生：{{ record.doctor_name }}
+                            </div>
                         </div>
                     </div>
                     <button @click="showMedicalRecordModal = false" class="mt-4 w-full bg-gray-200 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-300">关闭</button>
                 </div>
             </div>
 
+            <!-- 缴费记录 -->
             <div v-if="showPaymentHistoryModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" @click.self="showPaymentHistoryModal = false">
                 <div class="bg-white rounded-2xl p-6 max-w-md w-full m-4 shadow-2xl">
                     <h3 class="text-xl font-bold mb-4 flex items-center gap-2 text-orange-700">
                         <span>🧾 缴费记录</span>
                         <span class="text-sm font-normal text-gray-500">患者：{{ currentPatientName || currentId }}</span>
                     </h3>
-                    <div class="space-y-3 max-h-80 overflow-y-auto">
-                        <div class="flex justify-between items-center p-2 border-b">
-                            <div>
-                                <div class="font-medium">门诊缴费</div>
-                                <div class="text-xs text-gray-500">挂号费及检查费</div>
-                            </div>
-                            <span class="text-gray-700">¥120.00</span>
-                        </div>
-                    </div>
+                    <div class="text-gray-400 text-center py-4">暂未接入真实缴费记录数据</div>
                     <button @click="showPaymentHistoryModal = false" class="mt-4 w-full bg-gray-200 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-300">关闭</button>
                 </div>
             </div>
 
+            <!-- 🌟 核心：真实处方查询（动态遍历数据库） -->
             <div v-if="showPrescriptionQueryModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" @click.self="showPrescriptionQueryModal = false">
                 <div class="bg-white rounded-2xl p-6 max-w-md w-full m-4 shadow-2xl">
                     <h3 class="text-xl font-bold mb-4 flex items-center gap-2 text-blue-700">
                         <span>💊 处方查询</span>
                         <span class="text-sm font-normal text-gray-500">患者：{{ currentPatientName || currentId }}</span>
                     </h3>
-                    <div class="space-y-3 max-h-80 overflow-y-auto">
-                        <div v-if="currentPatient && currentPatient.prescriptions && currentPatient.prescriptions.length > 0">
-                            <div v-for="(rx, index) in currentPatient.prescriptions" :key="index" class="p-3 border border-blue-200 rounded-lg bg-blue-50 mb-2">
-                                <div class="font-medium">{{ rx.drug }}</div>
-                                <div class="text-sm text-gray-600">剂量：{{ rx.dosage }}</div>
-                                <div class="text-sm text-gray-600">用法：{{ rx.usage }}</div>
+                    
+                    <div v-if="loadingRecords" class="text-center py-8 text-blue-500">正在从数据库拉取处方...</div>
+                    
+                    <div v-else class="space-y-4 max-h-80 overflow-y-auto">
+                        <div v-if="!hasPrescriptions" class="text-gray-400 text-center py-8">
+                            医生暂未开具任何处方药品
+                        </div>
+                        
+                        <!-- 动态循环渲染从数据库拿到的记录里的处方 -->
+                        <template v-for="(record, index) in dbRecords" :key="index">
+                            <div v-if="record.treatment_plan && record.treatment_plan.length > 0" class="mb-4">
+                                <div class="text-xs text-gray-500 mb-2">{{ record.visit_date }} - {{ record.department }}处方</div>
+                                <div v-for="(rx, rIndex) in record.treatment_plan" :key="rIndex" class="p-3 border border-blue-100 rounded-xl bg-blue-50/50 mb-2 shadow-sm">
+                                    <div class="font-bold text-base text-blue-900 mb-1">{{ rx.drug }}</div>
+                                    <div class="flex items-center gap-2 text-sm text-gray-600 bg-white p-1.5 rounded-lg">
+                                        <span class="bg-blue-100 text-blue-700 px-2 py-0.5 rounded text-xs">剂量</span> {{ rx.dosage }}
+                                    </div>
+                                    <div class="flex items-center gap-2 text-sm text-gray-600 bg-white p-1.5 rounded-lg mt-1">
+                                        <span class="bg-green-100 text-green-700 px-2 py-0.5 rounded text-xs">用法</span> {{ rx.usage }}
+                                    </div>
+                                </div>
                             </div>
-                        </div>
-                        <div v-else class="text-gray-400 text-center py-4">
-                            暂无处方记录
-                        </div>
+                        </template>
                     </div>
                     <button @click="showPrescriptionQueryModal = false" class="mt-4 w-full bg-gray-200 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-300">关闭</button>
                 </div>
@@ -247,19 +285,18 @@ const app = createApp({
     `
 });
 
-// 全局防白屏机制：如果 Vue 发生致命崩溃，将白屏替换为带有重置按钮的错误提示
+// 全局防白屏机制
 app.config.errorHandler = (err, instance, info) => {
     console.error("Vue 渲染错误:", err, info);
     document.body.innerHTML = `
         <div style="padding: 40px; text-align: center; font-family: sans-serif; background: #f8fafc; min-height: 100vh;">
             <div style="display: inline-block; text-align: left; background: #fef2f2; border: 2px solid #f87171; border-radius: 16px; padding: 30px; max-width: 600px; box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1);">
                 <h2 style="color: #b91c1c; margin-top: 0; font-size: 24px;">⚠️ 页面渲染遇到了致命错误</h2>
-                <p style="color: #7f1d1d; font-size: 16px;">这通常是因为之前测试残留的数据格式损坏导致的。</p>
                 <div style="background: #fff; padding: 15px; border-radius: 8px; margin: 20px 0; color: #333; font-family: monospace; overflow-x: auto; font-size: 14px;">
                     ${err.message}
                 </div>
                 <button onclick="localStorage.clear(); sessionStorage.clear(); location.reload();" style="background: #ef4444; color: white; border: none; padding: 12px 24px; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 16px; width: 100%; transition: background 0.2s;">
-                    👉 点击此处：一键清理损坏的缓存并重试
+                    👉 点击此处：一键清理缓存并重试
                 </button>
             </div>
         </div>
