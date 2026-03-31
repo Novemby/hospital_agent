@@ -1,0 +1,2030 @@
+{
+  "metadata": {
+    "dataset_name": "面诊同传Agent测试数据集",
+    "version": "1.0",
+    "created_at": "2026-03-31T16:23:39.841330",
+    "total_samples": 150,
+    "categories": {
+      "word_translation": 50,
+      "context_understanding": 50,
+      "memory_recall": 50
+    }
+  },
+  "test_cases": {
+    "word_translation": [
+      {
+        "input": {
+          "words": [
+            "头",
+            "痛",
+            "很",
+            "严重"
+          ],
+          "context": ""
+        },
+        "expected": {
+          "polished_text": "我头痛得很严重",
+          "objective_summary": "主诉:头痛,程度严重"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "肚子",
+            "不舒服",
+            "恶心"
+          ],
+          "context": ""
+        },
+        "expected": {
+          "polished_text": "我肚子不舒服,还有点恶心",
+          "objective_summary": "主诉:腹部不适,伴恶心"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "咳嗽",
+            "一周",
+            "发烧"
+          ],
+          "context": ""
+        },
+        "expected": {
+          "polished_text": "我咳嗽一周了,还发烧",
+          "objective_summary": "主诉:咳嗽1周,伴发热"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "头晕",
+            "站不稳"
+          ],
+          "context": ""
+        },
+        "expected": {
+          "polished_text": "我头晕,站不稳",
+          "objective_summary": "主诉:头晕,伴平衡障碍"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "腹泻",
+            "三天"
+          ],
+          "context": ""
+        },
+        "expected": {
+          "polished_text": "我腹泻三天了",
+          "objective_summary": "主诉:腹泻3天"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "胸闷",
+            "气短"
+          ],
+          "context": ""
+        },
+        "expected": {
+          "polished_text": "我胸闷气短",
+          "objective_summary": "主诉:胸闷,伴气短"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "腹泻",
+            "三天"
+          ],
+          "context": ""
+        },
+        "expected": {
+          "polished_text": "我腹泻三天了",
+          "objective_summary": "主诉:腹泻3天"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "胸闷",
+            "气短"
+          ],
+          "context": ""
+        },
+        "expected": {
+          "polished_text": "我胸闷气短",
+          "objective_summary": "主诉:胸闷,伴气短"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "眼睛",
+            "模糊"
+          ],
+          "context": ""
+        },
+        "expected": {
+          "polished_text": "我眼睛看东西模糊",
+          "objective_summary": "主诉:视物模糊"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "耳朵",
+            "嗡嗡响"
+          ],
+          "context": ""
+        },
+        "expected": {
+          "polished_text": "我耳朵一直嗡嗡响",
+          "objective_summary": "主诉:耳鸣"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "眼睛",
+            "模糊"
+          ],
+          "context": ""
+        },
+        "expected": {
+          "polished_text": "我眼睛看东西模糊",
+          "objective_summary": "主诉:视物模糊"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "耳朵",
+            "嗡嗡响"
+          ],
+          "context": ""
+        },
+        "expected": {
+          "polished_text": "我耳朵一直嗡嗡响",
+          "objective_summary": "主诉:耳鸣"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "头晕",
+            "站不稳"
+          ],
+          "context": ""
+        },
+        "expected": {
+          "polished_text": "我头晕,站不稳",
+          "objective_summary": "主诉:头晕,伴平衡障碍"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "头晕",
+            "站不稳"
+          ],
+          "context": ""
+        },
+        "expected": {
+          "polished_text": "我头晕,站不稳",
+          "objective_summary": "主诉:头晕,伴平衡障碍"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "头晕",
+            "站不稳"
+          ],
+          "context": ""
+        },
+        "expected": {
+          "polished_text": "我头晕,站不稳",
+          "objective_summary": "主诉:头晕,伴平衡障碍"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "胸闷",
+            "气短"
+          ],
+          "context": ""
+        },
+        "expected": {
+          "polished_text": "我胸闷气短",
+          "objective_summary": "主诉:胸闷,伴气短"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "耳朵",
+            "嗡嗡响"
+          ],
+          "context": ""
+        },
+        "expected": {
+          "polished_text": "我耳朵一直嗡嗡响",
+          "objective_summary": "主诉:耳鸣"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "头晕",
+            "站不稳"
+          ],
+          "context": ""
+        },
+        "expected": {
+          "polished_text": "我头晕,站不稳",
+          "objective_summary": "主诉:头晕,伴平衡障碍"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "腹泻",
+            "三天"
+          ],
+          "context": ""
+        },
+        "expected": {
+          "polished_text": "我腹泻三天了",
+          "objective_summary": "主诉:腹泻3天"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "耳朵",
+            "嗡嗡响"
+          ],
+          "context": ""
+        },
+        "expected": {
+          "polished_text": "我耳朵一直嗡嗡响",
+          "objective_summary": "主诉:耳鸣"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "耳朵",
+            "嗡嗡响"
+          ],
+          "context": ""
+        },
+        "expected": {
+          "polished_text": "我耳朵一直嗡嗡响",
+          "objective_summary": "主诉:耳鸣"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "胸闷",
+            "气短"
+          ],
+          "context": ""
+        },
+        "expected": {
+          "polished_text": "我胸闷气短",
+          "objective_summary": "主诉:胸闷,伴气短"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "眼睛",
+            "模糊"
+          ],
+          "context": ""
+        },
+        "expected": {
+          "polished_text": "我眼睛看东西模糊",
+          "objective_summary": "主诉:视物模糊"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "胸闷",
+            "气短"
+          ],
+          "context": ""
+        },
+        "expected": {
+          "polished_text": "我胸闷气短",
+          "objective_summary": "主诉:胸闷,伴气短"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "头晕",
+            "站不稳"
+          ],
+          "context": ""
+        },
+        "expected": {
+          "polished_text": "我头晕,站不稳",
+          "objective_summary": "主诉:头晕,伴平衡障碍"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "腹泻",
+            "三天"
+          ],
+          "context": ""
+        },
+        "expected": {
+          "polished_text": "我腹泻三天了",
+          "objective_summary": "主诉:腹泻3天"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "腹泻",
+            "三天"
+          ],
+          "context": ""
+        },
+        "expected": {
+          "polished_text": "我腹泻三天了",
+          "objective_summary": "主诉:腹泻3天"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "头晕",
+            "站不稳"
+          ],
+          "context": ""
+        },
+        "expected": {
+          "polished_text": "我头晕,站不稳",
+          "objective_summary": "主诉:头晕,伴平衡障碍"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "腹泻",
+            "三天"
+          ],
+          "context": ""
+        },
+        "expected": {
+          "polished_text": "我腹泻三天了",
+          "objective_summary": "主诉:腹泻3天"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "胸闷",
+            "气短"
+          ],
+          "context": ""
+        },
+        "expected": {
+          "polished_text": "我胸闷气短",
+          "objective_summary": "主诉:胸闷,伴气短"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "胸闷",
+            "气短"
+          ],
+          "context": ""
+        },
+        "expected": {
+          "polished_text": "我胸闷气短",
+          "objective_summary": "主诉:胸闷,伴气短"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "头晕",
+            "站不稳"
+          ],
+          "context": ""
+        },
+        "expected": {
+          "polished_text": "我头晕,站不稳",
+          "objective_summary": "主诉:头晕,伴平衡障碍"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "腹泻",
+            "三天"
+          ],
+          "context": ""
+        },
+        "expected": {
+          "polished_text": "我腹泻三天了",
+          "objective_summary": "主诉:腹泻3天"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "耳朵",
+            "嗡嗡响"
+          ],
+          "context": ""
+        },
+        "expected": {
+          "polished_text": "我耳朵一直嗡嗡响",
+          "objective_summary": "主诉:耳鸣"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "眼睛",
+            "模糊"
+          ],
+          "context": ""
+        },
+        "expected": {
+          "polished_text": "我眼睛看东西模糊",
+          "objective_summary": "主诉:视物模糊"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "耳朵",
+            "嗡嗡响"
+          ],
+          "context": ""
+        },
+        "expected": {
+          "polished_text": "我耳朵一直嗡嗡响",
+          "objective_summary": "主诉:耳鸣"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "胸闷",
+            "气短"
+          ],
+          "context": ""
+        },
+        "expected": {
+          "polished_text": "我胸闷气短",
+          "objective_summary": "主诉:胸闷,伴气短"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "胸闷",
+            "气短"
+          ],
+          "context": ""
+        },
+        "expected": {
+          "polished_text": "我胸闷气短",
+          "objective_summary": "主诉:胸闷,伴气短"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "胸闷",
+            "气短"
+          ],
+          "context": ""
+        },
+        "expected": {
+          "polished_text": "我胸闷气短",
+          "objective_summary": "主诉:胸闷,伴气短"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "胸闷",
+            "气短"
+          ],
+          "context": ""
+        },
+        "expected": {
+          "polished_text": "我胸闷气短",
+          "objective_summary": "主诉:胸闷,伴气短"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "眼睛",
+            "模糊"
+          ],
+          "context": ""
+        },
+        "expected": {
+          "polished_text": "我眼睛看东西模糊",
+          "objective_summary": "主诉:视物模糊"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "头晕",
+            "站不稳"
+          ],
+          "context": ""
+        },
+        "expected": {
+          "polished_text": "我头晕,站不稳",
+          "objective_summary": "主诉:头晕,伴平衡障碍"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "胸闷",
+            "气短"
+          ],
+          "context": ""
+        },
+        "expected": {
+          "polished_text": "我胸闷气短",
+          "objective_summary": "主诉:胸闷,伴气短"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "腹泻",
+            "三天"
+          ],
+          "context": ""
+        },
+        "expected": {
+          "polished_text": "我腹泻三天了",
+          "objective_summary": "主诉:腹泻3天"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "眼睛",
+            "模糊"
+          ],
+          "context": ""
+        },
+        "expected": {
+          "polished_text": "我眼睛看东西模糊",
+          "objective_summary": "主诉:视物模糊"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "胸闷",
+            "气短"
+          ],
+          "context": ""
+        },
+        "expected": {
+          "polished_text": "我胸闷气短",
+          "objective_summary": "主诉:胸闷,伴气短"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "腹泻",
+            "三天"
+          ],
+          "context": ""
+        },
+        "expected": {
+          "polished_text": "我腹泻三天了",
+          "objective_summary": "主诉:腹泻3天"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "胸闷",
+            "气短"
+          ],
+          "context": ""
+        },
+        "expected": {
+          "polished_text": "我胸闷气短",
+          "objective_summary": "主诉:胸闷,伴气短"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "头晕",
+            "站不稳"
+          ],
+          "context": ""
+        },
+        "expected": {
+          "polished_text": "我头晕,站不稳",
+          "objective_summary": "主诉:头晕,伴平衡障碍"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "眼睛",
+            "模糊"
+          ],
+          "context": ""
+        },
+        "expected": {
+          "polished_text": "我眼睛看东西模糊",
+          "objective_summary": "主诉:视物模糊"
+        }
+      }
+    ],
+    "context_understanding": [
+      {
+        "input": {
+          "words": [
+            "还是",
+            "那样"
+          ],
+          "context": "医生:您的头痛有好转吗?\n患者手语:"
+        },
+        "expected": {
+          "polished_text": "头痛还是和之前一样,没有好转",
+          "objective_summary": "头痛症状无缓解"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "更",
+            "严重",
+            "了"
+          ],
+          "context": "医生:吃药后症状有变化吗?\n患者手语:"
+        },
+        "expected": {
+          "polished_text": "吃药后症状更严重了",
+          "objective_summary": "用药后症状加重"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "好",
+            "一点"
+          ],
+          "context": "医生:休息后疼痛有缓解吗?\n患者手语:"
+        },
+        "expected": {
+          "polished_text": "休息后疼痛好一点了",
+          "objective_summary": "休息后疼痛缓解"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "是的"
+          ],
+          "context": "医生询问症状变化"
+        },
+        "expected": {
+          "polished_text": "根据上下文理解患者回应",
+          "objective_summary": "患者对医生询问的回应"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "没有"
+          ],
+          "context": "医生询问症状变化"
+        },
+        "expected": {
+          "polished_text": "根据上下文理解患者回应",
+          "objective_summary": "患者对医生询问的回应"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "不是"
+          ],
+          "context": "医生询问症状变化"
+        },
+        "expected": {
+          "polished_text": "根据上下文理解患者回应",
+          "objective_summary": "患者对医生询问的回应"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "不是"
+          ],
+          "context": "医生询问症状变化"
+        },
+        "expected": {
+          "polished_text": "根据上下文理解患者回应",
+          "objective_summary": "患者对医生询问的回应"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "没有"
+          ],
+          "context": "医生询问症状变化"
+        },
+        "expected": {
+          "polished_text": "根据上下文理解患者回应",
+          "objective_summary": "患者对医生询问的回应"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "有点"
+          ],
+          "context": "医生询问症状变化"
+        },
+        "expected": {
+          "polished_text": "根据上下文理解患者回应",
+          "objective_summary": "患者对医生询问的回应"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "有点"
+          ],
+          "context": "医生询问症状变化"
+        },
+        "expected": {
+          "polished_text": "根据上下文理解患者回应",
+          "objective_summary": "患者对医生询问的回应"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "不是"
+          ],
+          "context": "医生询问症状变化"
+        },
+        "expected": {
+          "polished_text": "根据上下文理解患者回应",
+          "objective_summary": "患者对医生询问的回应"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "不是"
+          ],
+          "context": "医生询问症状变化"
+        },
+        "expected": {
+          "polished_text": "根据上下文理解患者回应",
+          "objective_summary": "患者对医生询问的回应"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "是的"
+          ],
+          "context": "医生询问症状变化"
+        },
+        "expected": {
+          "polished_text": "根据上下文理解患者回应",
+          "objective_summary": "患者对医生询问的回应"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "不是"
+          ],
+          "context": "医生询问症状变化"
+        },
+        "expected": {
+          "polished_text": "根据上下文理解患者回应",
+          "objective_summary": "患者对医生询问的回应"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "没有"
+          ],
+          "context": "医生询问症状变化"
+        },
+        "expected": {
+          "polished_text": "根据上下文理解患者回应",
+          "objective_summary": "患者对医生询问的回应"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "有点"
+          ],
+          "context": "医生询问症状变化"
+        },
+        "expected": {
+          "polished_text": "根据上下文理解患者回应",
+          "objective_summary": "患者对医生询问的回应"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "有点"
+          ],
+          "context": "医生询问症状变化"
+        },
+        "expected": {
+          "polished_text": "根据上下文理解患者回应",
+          "objective_summary": "患者对医生询问的回应"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "是的"
+          ],
+          "context": "医生询问症状变化"
+        },
+        "expected": {
+          "polished_text": "根据上下文理解患者回应",
+          "objective_summary": "患者对医生询问的回应"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "有点"
+          ],
+          "context": "医生询问症状变化"
+        },
+        "expected": {
+          "polished_text": "根据上下文理解患者回应",
+          "objective_summary": "患者对医生询问的回应"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "有点"
+          ],
+          "context": "医生询问症状变化"
+        },
+        "expected": {
+          "polished_text": "根据上下文理解患者回应",
+          "objective_summary": "患者对医生询问的回应"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "没有"
+          ],
+          "context": "医生询问症状变化"
+        },
+        "expected": {
+          "polished_text": "根据上下文理解患者回应",
+          "objective_summary": "患者对医生询问的回应"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "有点"
+          ],
+          "context": "医生询问症状变化"
+        },
+        "expected": {
+          "polished_text": "根据上下文理解患者回应",
+          "objective_summary": "患者对医生询问的回应"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "是的"
+          ],
+          "context": "医生询问症状变化"
+        },
+        "expected": {
+          "polished_text": "根据上下文理解患者回应",
+          "objective_summary": "患者对医生询问的回应"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "是的"
+          ],
+          "context": "医生询问症状变化"
+        },
+        "expected": {
+          "polished_text": "根据上下文理解患者回应",
+          "objective_summary": "患者对医生询问的回应"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "有点"
+          ],
+          "context": "医生询问症状变化"
+        },
+        "expected": {
+          "polished_text": "根据上下文理解患者回应",
+          "objective_summary": "患者对医生询问的回应"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "不是"
+          ],
+          "context": "医生询问症状变化"
+        },
+        "expected": {
+          "polished_text": "根据上下文理解患者回应",
+          "objective_summary": "患者对医生询问的回应"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "有点"
+          ],
+          "context": "医生询问症状变化"
+        },
+        "expected": {
+          "polished_text": "根据上下文理解患者回应",
+          "objective_summary": "患者对医生询问的回应"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "是的"
+          ],
+          "context": "医生询问症状变化"
+        },
+        "expected": {
+          "polished_text": "根据上下文理解患者回应",
+          "objective_summary": "患者对医生询问的回应"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "是的"
+          ],
+          "context": "医生询问症状变化"
+        },
+        "expected": {
+          "polished_text": "根据上下文理解患者回应",
+          "objective_summary": "患者对医生询问的回应"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "没有"
+          ],
+          "context": "医生询问症状变化"
+        },
+        "expected": {
+          "polished_text": "根据上下文理解患者回应",
+          "objective_summary": "患者对医生询问的回应"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "有点"
+          ],
+          "context": "医生询问症状变化"
+        },
+        "expected": {
+          "polished_text": "根据上下文理解患者回应",
+          "objective_summary": "患者对医生询问的回应"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "有点"
+          ],
+          "context": "医生询问症状变化"
+        },
+        "expected": {
+          "polished_text": "根据上下文理解患者回应",
+          "objective_summary": "患者对医生询问的回应"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "没有"
+          ],
+          "context": "医生询问症状变化"
+        },
+        "expected": {
+          "polished_text": "根据上下文理解患者回应",
+          "objective_summary": "患者对医生询问的回应"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "是的"
+          ],
+          "context": "医生询问症状变化"
+        },
+        "expected": {
+          "polished_text": "根据上下文理解患者回应",
+          "objective_summary": "患者对医生询问的回应"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "没有"
+          ],
+          "context": "医生询问症状变化"
+        },
+        "expected": {
+          "polished_text": "根据上下文理解患者回应",
+          "objective_summary": "患者对医生询问的回应"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "不是"
+          ],
+          "context": "医生询问症状变化"
+        },
+        "expected": {
+          "polished_text": "根据上下文理解患者回应",
+          "objective_summary": "患者对医生询问的回应"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "有点"
+          ],
+          "context": "医生询问症状变化"
+        },
+        "expected": {
+          "polished_text": "根据上下文理解患者回应",
+          "objective_summary": "患者对医生询问的回应"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "是的"
+          ],
+          "context": "医生询问症状变化"
+        },
+        "expected": {
+          "polished_text": "根据上下文理解患者回应",
+          "objective_summary": "患者对医生询问的回应"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "没有"
+          ],
+          "context": "医生询问症状变化"
+        },
+        "expected": {
+          "polished_text": "根据上下文理解患者回应",
+          "objective_summary": "患者对医生询问的回应"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "是的"
+          ],
+          "context": "医生询问症状变化"
+        },
+        "expected": {
+          "polished_text": "根据上下文理解患者回应",
+          "objective_summary": "患者对医生询问的回应"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "不是"
+          ],
+          "context": "医生询问症状变化"
+        },
+        "expected": {
+          "polished_text": "根据上下文理解患者回应",
+          "objective_summary": "患者对医生询问的回应"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "有点"
+          ],
+          "context": "医生询问症状变化"
+        },
+        "expected": {
+          "polished_text": "根据上下文理解患者回应",
+          "objective_summary": "患者对医生询问的回应"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "没有"
+          ],
+          "context": "医生询问症状变化"
+        },
+        "expected": {
+          "polished_text": "根据上下文理解患者回应",
+          "objective_summary": "患者对医生询问的回应"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "是的"
+          ],
+          "context": "医生询问症状变化"
+        },
+        "expected": {
+          "polished_text": "根据上下文理解患者回应",
+          "objective_summary": "患者对医生询问的回应"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "有点"
+          ],
+          "context": "医生询问症状变化"
+        },
+        "expected": {
+          "polished_text": "根据上下文理解患者回应",
+          "objective_summary": "患者对医生询问的回应"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "有点"
+          ],
+          "context": "医生询问症状变化"
+        },
+        "expected": {
+          "polished_text": "根据上下文理解患者回应",
+          "objective_summary": "患者对医生询问的回应"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "是的"
+          ],
+          "context": "医生询问症状变化"
+        },
+        "expected": {
+          "polished_text": "根据上下文理解患者回应",
+          "objective_summary": "患者对医生询问的回应"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "有点"
+          ],
+          "context": "医生询问症状变化"
+        },
+        "expected": {
+          "polished_text": "根据上下文理解患者回应",
+          "objective_summary": "患者对医生询问的回应"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "有点"
+          ],
+          "context": "医生询问症状变化"
+        },
+        "expected": {
+          "polished_text": "根据上下文理解患者回应",
+          "objective_summary": "患者对医生询问的回应"
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "没有"
+          ],
+          "context": "医生询问症状变化"
+        },
+        "expected": {
+          "polished_text": "根据上下文理解患者回应",
+          "objective_summary": "患者对医生询问的回应"
+        }
+      }
+    ],
+    "memory_recall": [
+      {
+        "input": {
+          "words": [
+            "老毛病",
+            "又犯了"
+          ],
+          "context": "",
+          "patient_profile": "{\"chronic_conditions\": [\"高血压\", \"糖尿病\"], \"frequent_symptoms\": [\"头晕\", \"乏力\"]}"
+        },
+        "expected": {
+          "polished_text": "我的高血压老毛病又犯了,头晕乏力",
+          "objective_summary": "既往高血压病史,本次头晕乏力复发",
+          "memory_used": true
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "和",
+            "上次",
+            "一样"
+          ],
+          "context": "",
+          "patient_profile": "{\"visit_history\": [{\"date\": \"2024-03-15\", \"symptoms\": [\"胃痛\", \"反酸\"], \"department\": \"消化内科\"}]}"
+        },
+        "expected": {
+          "polished_text": "和上次一样,胃痛反酸",
+          "objective_summary": "症状同前次就诊(2024-03-15):胃痛、反酸",
+          "memory_used": true
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "又",
+            "不舒服"
+          ],
+          "context": "",
+          "patient_profile": "{\"frequent_symptoms\": [\"胃痛\"]}"
+        },
+        "expected": {
+          "polished_text": "根据病史理解患者表述",
+          "objective_summary": "结合既往病史的症状描述",
+          "memory_used": true
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "又",
+            "不舒服"
+          ],
+          "context": "",
+          "patient_profile": "{\"frequent_symptoms\": [\"胃痛\"]}"
+        },
+        "expected": {
+          "polished_text": "根据病史理解患者表述",
+          "objective_summary": "结合既往病史的症状描述",
+          "memory_used": true
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "又",
+            "不舒服"
+          ],
+          "context": "",
+          "patient_profile": "{\"frequent_symptoms\": [\"关节痛\"]}"
+        },
+        "expected": {
+          "polished_text": "根据病史理解患者表述",
+          "objective_summary": "结合既往病史的症状描述",
+          "memory_used": true
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "又",
+            "不舒服"
+          ],
+          "context": "",
+          "patient_profile": "{\"frequent_symptoms\": [\"胃痛\"]}"
+        },
+        "expected": {
+          "polished_text": "根据病史理解患者表述",
+          "objective_summary": "结合既往病史的症状描述",
+          "memory_used": true
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "又",
+            "不舒服"
+          ],
+          "context": "",
+          "patient_profile": "{\"frequent_symptoms\": [\"关节痛\"]}"
+        },
+        "expected": {
+          "polished_text": "根据病史理解患者表述",
+          "objective_summary": "结合既往病史的症状描述",
+          "memory_used": true
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "又",
+            "不舒服"
+          ],
+          "context": "",
+          "patient_profile": "{\"frequent_symptoms\": [\"头痛\"]}"
+        },
+        "expected": {
+          "polished_text": "根据病史理解患者表述",
+          "objective_summary": "结合既往病史的症状描述",
+          "memory_used": true
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "又",
+            "不舒服"
+          ],
+          "context": "",
+          "patient_profile": "{\"frequent_symptoms\": [\"头痛\"]}"
+        },
+        "expected": {
+          "polished_text": "根据病史理解患者表述",
+          "objective_summary": "结合既往病史的症状描述",
+          "memory_used": true
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "又",
+            "不舒服"
+          ],
+          "context": "",
+          "patient_profile": "{\"frequent_symptoms\": [\"胃痛\"]}"
+        },
+        "expected": {
+          "polished_text": "根据病史理解患者表述",
+          "objective_summary": "结合既往病史的症状描述",
+          "memory_used": true
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "又",
+            "不舒服"
+          ],
+          "context": "",
+          "patient_profile": "{\"frequent_symptoms\": [\"关节痛\"]}"
+        },
+        "expected": {
+          "polished_text": "根据病史理解患者表述",
+          "objective_summary": "结合既往病史的症状描述",
+          "memory_used": true
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "又",
+            "不舒服"
+          ],
+          "context": "",
+          "patient_profile": "{\"frequent_symptoms\": [\"胃痛\"]}"
+        },
+        "expected": {
+          "polished_text": "根据病史理解患者表述",
+          "objective_summary": "结合既往病史的症状描述",
+          "memory_used": true
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "又",
+            "不舒服"
+          ],
+          "context": "",
+          "patient_profile": "{\"frequent_symptoms\": [\"关节痛\"]}"
+        },
+        "expected": {
+          "polished_text": "根据病史理解患者表述",
+          "objective_summary": "结合既往病史的症状描述",
+          "memory_used": true
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "又",
+            "不舒服"
+          ],
+          "context": "",
+          "patient_profile": "{\"frequent_symptoms\": [\"关节痛\"]}"
+        },
+        "expected": {
+          "polished_text": "根据病史理解患者表述",
+          "objective_summary": "结合既往病史的症状描述",
+          "memory_used": true
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "又",
+            "不舒服"
+          ],
+          "context": "",
+          "patient_profile": "{\"frequent_symptoms\": [\"头痛\"]}"
+        },
+        "expected": {
+          "polished_text": "根据病史理解患者表述",
+          "objective_summary": "结合既往病史的症状描述",
+          "memory_used": true
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "又",
+            "不舒服"
+          ],
+          "context": "",
+          "patient_profile": "{\"frequent_symptoms\": [\"关节痛\"]}"
+        },
+        "expected": {
+          "polished_text": "根据病史理解患者表述",
+          "objective_summary": "结合既往病史的症状描述",
+          "memory_used": true
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "又",
+            "不舒服"
+          ],
+          "context": "",
+          "patient_profile": "{\"frequent_symptoms\": [\"关节痛\"]}"
+        },
+        "expected": {
+          "polished_text": "根据病史理解患者表述",
+          "objective_summary": "结合既往病史的症状描述",
+          "memory_used": true
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "又",
+            "不舒服"
+          ],
+          "context": "",
+          "patient_profile": "{\"frequent_symptoms\": [\"胃痛\"]}"
+        },
+        "expected": {
+          "polished_text": "根据病史理解患者表述",
+          "objective_summary": "结合既往病史的症状描述",
+          "memory_used": true
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "又",
+            "不舒服"
+          ],
+          "context": "",
+          "patient_profile": "{\"frequent_symptoms\": [\"胃痛\"]}"
+        },
+        "expected": {
+          "polished_text": "根据病史理解患者表述",
+          "objective_summary": "结合既往病史的症状描述",
+          "memory_used": true
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "又",
+            "不舒服"
+          ],
+          "context": "",
+          "patient_profile": "{\"frequent_symptoms\": [\"关节痛\"]}"
+        },
+        "expected": {
+          "polished_text": "根据病史理解患者表述",
+          "objective_summary": "结合既往病史的症状描述",
+          "memory_used": true
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "又",
+            "不舒服"
+          ],
+          "context": "",
+          "patient_profile": "{\"frequent_symptoms\": [\"头痛\"]}"
+        },
+        "expected": {
+          "polished_text": "根据病史理解患者表述",
+          "objective_summary": "结合既往病史的症状描述",
+          "memory_used": true
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "又",
+            "不舒服"
+          ],
+          "context": "",
+          "patient_profile": "{\"frequent_symptoms\": [\"胃痛\"]}"
+        },
+        "expected": {
+          "polished_text": "根据病史理解患者表述",
+          "objective_summary": "结合既往病史的症状描述",
+          "memory_used": true
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "又",
+            "不舒服"
+          ],
+          "context": "",
+          "patient_profile": "{\"frequent_symptoms\": [\"胃痛\"]}"
+        },
+        "expected": {
+          "polished_text": "根据病史理解患者表述",
+          "objective_summary": "结合既往病史的症状描述",
+          "memory_used": true
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "又",
+            "不舒服"
+          ],
+          "context": "",
+          "patient_profile": "{\"frequent_symptoms\": [\"头痛\"]}"
+        },
+        "expected": {
+          "polished_text": "根据病史理解患者表述",
+          "objective_summary": "结合既往病史的症状描述",
+          "memory_used": true
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "又",
+            "不舒服"
+          ],
+          "context": "",
+          "patient_profile": "{\"frequent_symptoms\": [\"胃痛\"]}"
+        },
+        "expected": {
+          "polished_text": "根据病史理解患者表述",
+          "objective_summary": "结合既往病史的症状描述",
+          "memory_used": true
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "又",
+            "不舒服"
+          ],
+          "context": "",
+          "patient_profile": "{\"frequent_symptoms\": [\"关节痛\"]}"
+        },
+        "expected": {
+          "polished_text": "根据病史理解患者表述",
+          "objective_summary": "结合既往病史的症状描述",
+          "memory_used": true
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "又",
+            "不舒服"
+          ],
+          "context": "",
+          "patient_profile": "{\"frequent_symptoms\": [\"关节痛\"]}"
+        },
+        "expected": {
+          "polished_text": "根据病史理解患者表述",
+          "objective_summary": "结合既往病史的症状描述",
+          "memory_used": true
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "又",
+            "不舒服"
+          ],
+          "context": "",
+          "patient_profile": "{\"frequent_symptoms\": [\"关节痛\"]}"
+        },
+        "expected": {
+          "polished_text": "根据病史理解患者表述",
+          "objective_summary": "结合既往病史的症状描述",
+          "memory_used": true
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "又",
+            "不舒服"
+          ],
+          "context": "",
+          "patient_profile": "{\"frequent_symptoms\": [\"胃痛\"]}"
+        },
+        "expected": {
+          "polished_text": "根据病史理解患者表述",
+          "objective_summary": "结合既往病史的症状描述",
+          "memory_used": true
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "又",
+            "不舒服"
+          ],
+          "context": "",
+          "patient_profile": "{\"frequent_symptoms\": [\"胃痛\"]}"
+        },
+        "expected": {
+          "polished_text": "根据病史理解患者表述",
+          "objective_summary": "结合既往病史的症状描述",
+          "memory_used": true
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "又",
+            "不舒服"
+          ],
+          "context": "",
+          "patient_profile": "{\"frequent_symptoms\": [\"胃痛\"]}"
+        },
+        "expected": {
+          "polished_text": "根据病史理解患者表述",
+          "objective_summary": "结合既往病史的症状描述",
+          "memory_used": true
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "又",
+            "不舒服"
+          ],
+          "context": "",
+          "patient_profile": "{\"frequent_symptoms\": [\"胃痛\"]}"
+        },
+        "expected": {
+          "polished_text": "根据病史理解患者表述",
+          "objective_summary": "结合既往病史的症状描述",
+          "memory_used": true
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "又",
+            "不舒服"
+          ],
+          "context": "",
+          "patient_profile": "{\"frequent_symptoms\": [\"关节痛\"]}"
+        },
+        "expected": {
+          "polished_text": "根据病史理解患者表述",
+          "objective_summary": "结合既往病史的症状描述",
+          "memory_used": true
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "又",
+            "不舒服"
+          ],
+          "context": "",
+          "patient_profile": "{\"frequent_symptoms\": [\"头痛\"]}"
+        },
+        "expected": {
+          "polished_text": "根据病史理解患者表述",
+          "objective_summary": "结合既往病史的症状描述",
+          "memory_used": true
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "又",
+            "不舒服"
+          ],
+          "context": "",
+          "patient_profile": "{\"frequent_symptoms\": [\"关节痛\"]}"
+        },
+        "expected": {
+          "polished_text": "根据病史理解患者表述",
+          "objective_summary": "结合既往病史的症状描述",
+          "memory_used": true
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "又",
+            "不舒服"
+          ],
+          "context": "",
+          "patient_profile": "{\"frequent_symptoms\": [\"胃痛\"]}"
+        },
+        "expected": {
+          "polished_text": "根据病史理解患者表述",
+          "objective_summary": "结合既往病史的症状描述",
+          "memory_used": true
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "又",
+            "不舒服"
+          ],
+          "context": "",
+          "patient_profile": "{\"frequent_symptoms\": [\"关节痛\"]}"
+        },
+        "expected": {
+          "polished_text": "根据病史理解患者表述",
+          "objective_summary": "结合既往病史的症状描述",
+          "memory_used": true
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "又",
+            "不舒服"
+          ],
+          "context": "",
+          "patient_profile": "{\"frequent_symptoms\": [\"头痛\"]}"
+        },
+        "expected": {
+          "polished_text": "根据病史理解患者表述",
+          "objective_summary": "结合既往病史的症状描述",
+          "memory_used": true
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "又",
+            "不舒服"
+          ],
+          "context": "",
+          "patient_profile": "{\"frequent_symptoms\": [\"关节痛\"]}"
+        },
+        "expected": {
+          "polished_text": "根据病史理解患者表述",
+          "objective_summary": "结合既往病史的症状描述",
+          "memory_used": true
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "又",
+            "不舒服"
+          ],
+          "context": "",
+          "patient_profile": "{\"frequent_symptoms\": [\"头痛\"]}"
+        },
+        "expected": {
+          "polished_text": "根据病史理解患者表述",
+          "objective_summary": "结合既往病史的症状描述",
+          "memory_used": true
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "又",
+            "不舒服"
+          ],
+          "context": "",
+          "patient_profile": "{\"frequent_symptoms\": [\"胃痛\"]}"
+        },
+        "expected": {
+          "polished_text": "根据病史理解患者表述",
+          "objective_summary": "结合既往病史的症状描述",
+          "memory_used": true
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "又",
+            "不舒服"
+          ],
+          "context": "",
+          "patient_profile": "{\"frequent_symptoms\": [\"关节痛\"]}"
+        },
+        "expected": {
+          "polished_text": "根据病史理解患者表述",
+          "objective_summary": "结合既往病史的症状描述",
+          "memory_used": true
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "又",
+            "不舒服"
+          ],
+          "context": "",
+          "patient_profile": "{\"frequent_symptoms\": [\"关节痛\"]}"
+        },
+        "expected": {
+          "polished_text": "根据病史理解患者表述",
+          "objective_summary": "结合既往病史的症状描述",
+          "memory_used": true
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "又",
+            "不舒服"
+          ],
+          "context": "",
+          "patient_profile": "{\"frequent_symptoms\": [\"关节痛\"]}"
+        },
+        "expected": {
+          "polished_text": "根据病史理解患者表述",
+          "objective_summary": "结合既往病史的症状描述",
+          "memory_used": true
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "又",
+            "不舒服"
+          ],
+          "context": "",
+          "patient_profile": "{\"frequent_symptoms\": [\"关节痛\"]}"
+        },
+        "expected": {
+          "polished_text": "根据病史理解患者表述",
+          "objective_summary": "结合既往病史的症状描述",
+          "memory_used": true
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "又",
+            "不舒服"
+          ],
+          "context": "",
+          "patient_profile": "{\"frequent_symptoms\": [\"胃痛\"]}"
+        },
+        "expected": {
+          "polished_text": "根据病史理解患者表述",
+          "objective_summary": "结合既往病史的症状描述",
+          "memory_used": true
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "又",
+            "不舒服"
+          ],
+          "context": "",
+          "patient_profile": "{\"frequent_symptoms\": [\"头痛\"]}"
+        },
+        "expected": {
+          "polished_text": "根据病史理解患者表述",
+          "objective_summary": "结合既往病史的症状描述",
+          "memory_used": true
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "又",
+            "不舒服"
+          ],
+          "context": "",
+          "patient_profile": "{\"frequent_symptoms\": [\"头痛\"]}"
+        },
+        "expected": {
+          "polished_text": "根据病史理解患者表述",
+          "objective_summary": "结合既往病史的症状描述",
+          "memory_used": true
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "又",
+            "不舒服"
+          ],
+          "context": "",
+          "patient_profile": "{\"frequent_symptoms\": [\"关节痛\"]}"
+        },
+        "expected": {
+          "polished_text": "根据病史理解患者表述",
+          "objective_summary": "结合既往病史的症状描述",
+          "memory_used": true
+        }
+      },
+      {
+        "input": {
+          "words": [
+            "又",
+            "不舒服"
+          ],
+          "context": "",
+          "patient_profile": "{\"frequent_symptoms\": [\"胃痛\"]}"
+        },
+        "expected": {
+          "polished_text": "根据病史理解患者表述",
+          "objective_summary": "结合既往病史的症状描述",
+          "memory_used": true
+        }
+      }
+    ]
+  }
+}
