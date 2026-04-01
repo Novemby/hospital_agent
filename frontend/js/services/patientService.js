@@ -42,6 +42,20 @@ function normalizePatient(patient) {
     };
 }
 
+function buildFreshEncounterState(patient = {}) {
+    return {
+        ...patient,
+        medicalHistory: '',
+        diagnosis: '',
+        prescriptions: [],
+        messages: [],
+        triageStruct: patient.triageStruct || patient.triage_struct || null,
+        ai_assist: null,
+        aiAssist: null,
+        is_finished: false,
+    };
+}
+
 function normalizeMessage(message) {
     return {
         ...message,
@@ -141,20 +155,29 @@ async function syncPatientsFromBackend(dept = null) {
         const normalized = normalizePatient(backendPatient);
 
         if (local) {
-            // 合并：保留本地存储的病史、处方、消息等，用后端返回的基本信息覆盖
-            const merged = {
-                ...normalized,                // 后端的基本信息
-                messages: local.messages || [], // 保留本地消息
-                prescriptions: local.prescriptions || normalized.prescriptions, // 保留本地处方
-                diagnosis: local.diagnosis || normalized.diagnosis, // 保留本地诊断
-                medicalHistory: local.medicalHistory || normalized.medicalHistory, // 保留本地病史
-            };
+            const sameRegistration =
+                String(local.registrationId || '') === String(normalized.registrationId || '');
+
+            const merged = sameRegistration
+                ? {
+                    ...normalized,
+                    messages: local.messages || [],
+                    prescriptions: local.prescriptions || normalized.prescriptions,
+                    diagnosis: local.diagnosis || normalized.diagnosis,
+                    medicalHistory: local.medicalHistory || normalized.medicalHistory,
+                    ai_assist: local.ai_assist || local.aiAssist || null,
+                    aiAssist: local.aiAssist || local.ai_assist || null,
+                }
+                : buildFreshEncounterState(normalized);
+
             patientMap.set(backendPatient.id, merged);
-            if (merged.messages && merged.messages.length > 0) {
+            if (sameRegistration && merged.messages && merged.messages.length > 0) {
                 console.log(`✅ 患者 ${backendPatient.id} 合并后保留了 ${merged.messages.length} 条消息`);
+            } else if (!sameRegistration) {
+                console.log(`🧹 患者 ${backendPatient.id} 检测到新挂号 ${normalized.registrationId}，已清空上一轮诊间缓存`);
             }
         } else {
-            patientMap.set(backendPatient.id, normalized);
+            patientMap.set(backendPatient.id, buildFreshEncounterState(normalized));
         }
     });
 
@@ -194,13 +217,19 @@ function upsertPatient(patient) {
     const index = patients.findIndex(p => p.id == patient.id);
     if (index >= 0) {
         const existingPatient = patients[index];
-        const nextPatient = { ...existingPatient, ...patient };
-        if (existingPatient.messages || patient.messages) {
+        const registrationChanged =
+            String(existingPatient.registrationId || '') !== String(patient.registrationId || existingPatient.registrationId || '');
+
+        const nextPatient = registrationChanged
+            ? buildFreshEncounterState({ ...existingPatient, ...patient })
+            : { ...existingPatient, ...patient };
+
+        if (!registrationChanged && (existingPatient.messages || patient.messages)) {
             nextPatient.messages = mergeMessages(existingPatient.messages || [], patient.messages || []);
         }
         patients[index] = nextPatient;
     } else {
-        const nextPatient = { ...patient };
+        const nextPatient = buildFreshEncounterState({ ...patient });
         if (nextPatient.messages) {
             nextPatient.messages = mergeMessages([], nextPatient.messages);
         }
