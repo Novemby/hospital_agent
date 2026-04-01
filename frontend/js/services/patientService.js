@@ -53,18 +53,46 @@ async function syncPatientsFromBackend(dept = null) {
     const rawPatients = await response.json();
     // 获取本地现有患者数据
     const localPatients = getPatients();
-    const mergedPatients = rawPatients.map(backendPatient => {
-        const local = localPatients.find(p => p.id == backendPatient.id);
-        if (local) {
-            // 合并：保留本地存储的病史、处方、消息等，用后端返回的基本信息覆盖
-            return {
-                ...local,                     // 保留所有本地字段
-                ...normalizePatient(backendPatient), // 覆盖基本信息（如姓名、性别、科室等）
-            };
-        } else {
-            return normalizePatient(backendPatient);
+
+    console.log('🔄 同步前本地患者数:', localPatients.length);
+    console.log('📥 后端返回患者数:', rawPatients.length);
+
+    // 创建一个Map来存储所有患者（以ID为键）
+    const patientMap = new Map();
+
+    // 先添加所有本地患者
+    localPatients.forEach(p => {
+        patientMap.set(p.id, p);
+        if (p.messages && p.messages.length > 0) {
+            console.log(`💬 患者 ${p.id} 本地有 ${p.messages.length} 条消息`);
         }
     });
+
+    // 然后用后端数据更新，但保留本地的messages等字段
+    rawPatients.forEach(backendPatient => {
+        const local = patientMap.get(backendPatient.id);
+        const normalized = normalizePatient(backendPatient);
+
+        if (local) {
+            // 合并：保留本地存储的病史、处方、消息等，用后端返回的基本信息覆盖
+            const merged = {
+                ...normalized,                // 后端的基本信息
+                messages: local.messages || [], // 保留本地消息
+                prescriptions: local.prescriptions || normalized.prescriptions, // 保留本地处方
+                diagnosis: local.diagnosis || normalized.diagnosis, // 保留本地诊断
+                medicalHistory: local.medicalHistory || normalized.medicalHistory, // 保留本地病史
+            };
+            patientMap.set(backendPatient.id, merged);
+            if (merged.messages && merged.messages.length > 0) {
+                console.log(`✅ 患者 ${backendPatient.id} 合并后保留了 ${merged.messages.length} 条消息`);
+            }
+        } else {
+            patientMap.set(backendPatient.id, normalized);
+        }
+    });
+
+    const mergedPatients = Array.from(patientMap.values());
+    console.log('💾 同步后总患者数:', mergedPatients.length);
     localStorage.setItem(STORAGE_KEY, JSON.stringify(mergedPatients));
     return mergedPatients;
 }

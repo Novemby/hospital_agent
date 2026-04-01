@@ -156,12 +156,23 @@ const app = createApp({
 
         const sendDoctorVoiceMessage = () => {
             if (!doctorVoiceText.value.trim() || !selectedPatient.value) return;
+
+            console.log('📤 发送消息前，当前患者消息数:', selectedPatient.value.messages?.length || 0);
+
             // 1. 将消息存入数据库 / LocalStorage
             addMessage(selectedPatient.value.id, { type: 'doc', content: doctorVoiceText.value });
             doctorVoiceText.value = '';
 
-            // 主动重新加载患者数据触发界面更新
-            loadPatients();
+            console.log('💾 消息已保存到localStorage');
+
+            // 直接从localStorage重新加载，不触发后端同步
+            const allPatients = getPatients();
+            const activePatients = allPatients.filter(p => !p.is_finished);
+            patients.value = doctorDept.value
+                ? activePatients.filter(p => p.dept === doctorDept.value)
+                : activePatients;
+
+            console.log('🔄 重新加载后，当前患者消息数:', selectedPatient.value?.messages?.length || 0);
         };
 
         const formatTime = (timestamp) => {
