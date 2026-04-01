@@ -1,5 +1,5 @@
 import { createApp, ref, computed, watch, onUnmounted, nextTick } from 'vue';
-import { getPatientById, upsertPatient } from './services/patientService.js?v=20260401-1';
+import { getPatientById, upsertPatient } from './services/patientService.js?v=20260401-2';
 import { patientLoginAPI, setCurrentPatient, getCurrentPatient, clearAuth } from './services/authService.js';
 import { SignLanguageAgent } from './services/signLanguageAgent.js';
 

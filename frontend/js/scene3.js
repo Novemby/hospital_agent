@@ -1,5 +1,5 @@
 import { createApp, ref, computed, onMounted, onUnmounted } from 'vue';
-import { getPatientById, upsertPatient } from './services/patientService.js?v=20260401-1';
+import { getPatientById, upsertPatient } from './services/patientService.js?v=20260401-2';
 import { setCurrentPatient, getCurrentPatient, clearAuth, patientLoginAPI } from './services/authService.js';
 
 const app = createApp({

@@ -1,5 +1,5 @@
 import { createApp, ref, computed, onMounted, onUnmounted, nextTick } from 'vue';
-import { getPatientById, addMessage, saveChatMessage, syncPatientMessagesFromBackend, upsertPatient } from './services/patientService.js?v=20260401-1';
+import { getPatientById, addMessage, saveChatMessage, syncPatientMessagesFromBackend, upsertPatient } from './services/patientService.js?v=20260401-2';
 import { SignLanguageAgent } from './services/signLanguageAgent.js';
 
 const app = createApp({
