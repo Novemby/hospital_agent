@@ -547,17 +547,6 @@ const app = createApp({
             }
         };
 
-        const sendPatientMessage = (text) => {
-            if (!text.trim()) return;
-            chatMessages.value.push({
-                id: Date.now(),
-                text: text.trim(),
-                sender: 'patient',
-                time: new Date().toLocaleTimeString()
-            });
-            voiceText.value = '';
-            recognizedText.value = '';
-        };
 
         const toggleVoiceRecording = async () => {
             if (isRecordingVoice.value) {
@@ -672,7 +661,7 @@ const app = createApp({
             quickTakeNumber, quickPayment, goToSignTriage, goBack,
             startCamera, startContinuousRecognition, toggleRecording, cameraStarted, recordDisabled,
             currentWord, currentConfidence, statusText, overlayText, overlayClass,
-            clearSequence, polishSequence, sendPatientMessage,
+            clearSequence, polishSequence,
             toggleVoiceRecording, startVoiceRecording, stopVoiceRecording,
             continuousActive, continuousWords, toggleContinuous, clearSignInput,
             assistantPhase, assistantDisplayText,
@@ -957,38 +946,22 @@ const app = createApp({
                                         </button>
                                     </div>
                                     <div v-show="showChat" class="mt-4 transition-all duration-300">
-                                        <div class="chat-messages max-h-48 overflow-y-auto mb-4 space-y-2 border-t pt-2">
-                                            <div v-for="msg in chatMessages" :key="msg.id" class="flex justify-end">
-                                                <div class="bg-blue-500 text-white rounded-lg px-3 py-2 max-w-xs break-words">
-                                                    <div class="text-sm">{{ msg.text }}</div>
-                                                    <div class="text-xs text-blue-100 mt-1 text-right">{{ msg.time }}</div>
-                                                </div>
-                                            </div>
-                                            <div v-if="chatMessages.length === 0" class="text-center text-gray-400 text-sm py-4">
-                                                人工座席在线，如 AI 无法解决您的问题，请在此沟通
-                                            </div>
-                                        </div>
-                            
-                                        <!-- 实时识别提示 -->
-                                        <div v-if="recognizedText" class="mb-3 p-2 bg-blue-50 border border-blue-200 rounded-lg">
+                                        <!-- 实时识别显示 -->
+                                        <div class="p-3 bg-blue-50 border border-blue-200 rounded-lg min-h-16">
                                             <div class="text-xs text-blue-600 mb-1 font-medium flex items-center gap-1">
-                                                <span class="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></span>
-                                                正在识别...
+                                                <span class="w-2 h-2 rounded-full bg-blue-500" :class="isRecordingVoice ? 'animate-pulse' : ''"></span>
+                                                {{ isRecordingVoice ? '正在识别...' : '语音识别' }}
                                             </div>
-                                            <div class="text-gray-800 text-sm">{{ recognizedText }}</div>
+                                            <div class="text-gray-800 text-sm">{{ recognizedText || voiceText || '请点击下方按钮开始语音输入' }}</div>
                                         </div>
-                            
-                                        <input v-model="voiceText" type="text" placeholder="输入交互信息或点击语音输入..." class="w-full border rounded-lg p-2 mb-2 text-sm outline-none focus:border-blue-400">
-                                        <div class="flex justify-between gap-2">
+                                        <input v-model="voiceText" type="text" placeholder="也可直接在此输入..." class="w-full border rounded-lg p-2 mt-2 text-sm outline-none focus:border-blue-400">
+                                        <div class="mt-2">
                                             <button @click="isRecordingVoice ? stopVoiceRecording() : startVoiceRecording()"
                                                     :class="isRecordingVoice ? 'bg-red-500 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'"
-                                                    class="px-3 py-2 rounded-lg text-sm flex items-center gap-1 font-medium transition-colors">
-                                                <span v-if="!isRecordingVoice">🎤 实时语音</span>
+                                                    class="w-full px-3 py-2 rounded-lg text-sm flex items-center justify-center gap-1 font-medium transition-colors">
+                                                <span v-if="!isRecordingVoice">🎤 开始语音</span>
                                                 <span v-else>⏹ 停止</span>
                                                 <span v-if="isRecordingVoice" class="w-2 h-2 rounded-full bg-white animate-ping ml-1"></span>
-                                            </button>
-                                            <button @click="sendPatientMessage(voiceText)" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 text-sm flex-1">
-                                                发送消息
                                             </button>
                                         </div>
                                     </div>
