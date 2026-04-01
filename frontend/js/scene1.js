@@ -890,7 +890,7 @@ const app = createApp({
                                         </div>
                                         <!-- LISTENING -->
                                         <div v-else-if="assistantPhase === 'LISTENING'" class="space-y-3">
-                                            <div class="text-5xl">👂</div>
+                                            <div class="text-5xl">👀</div>
                                             <div class="text-xl font-bold text-green-700">我在看，请继续比划...</div>
                                             <div v-if="continuousWords.length > 0" class="flex flex-wrap gap-2 justify-center mt-2">
                                                 <span v-for="(w, i) in continuousWords" :key="i" class="bg-green-100 text-green-800 px-3 py-1 rounded-full text-sm font-medium">{{ w }}</span>
@@ -898,7 +898,7 @@ const app = createApp({
                                         </div>
                                         <!-- THINKING -->
                                         <div v-else-if="assistantPhase === 'THINKING'" class="space-y-3">
-                                            <div class="text-5xl">🤔</div>
+                                            <div class="text-5xl">😊</div>
                                             <div class="text-xl font-bold text-blue-700">正在分析您的症状...</div>
                                             <div class="thinking-dots flex gap-2 justify-center mt-2">
                                                 <span></span><span></span><span></span>
