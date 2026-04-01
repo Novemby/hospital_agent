@@ -26,6 +26,8 @@ class PatientOut(BaseModel):
     allergy_history: Optional[str] = None
     is_deaf: bool
     dept: Optional[str] = None   # 最近挂号科室
+    registration_id: Optional[int] = None
+    current_state: Optional[str] = None
     triage_struct: Optional[Dict[str, Any]] = None  # Agent结构化分诊槽位（若有）
 
 class PatientLoginOut(BaseModel):
@@ -49,6 +51,10 @@ class RegistrationSubmitRequest(BaseModel):
     department: str
     schedule_id: Optional[int] = None
     triage_symptoms: Optional[str] = None
+
+
+class RegistrationStateUpdateRequest(BaseModel):
+    current_state: str
 
 class SlotInfo(BaseModel):
     slot_id: int

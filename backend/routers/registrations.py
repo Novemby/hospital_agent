@@ -61,3 +61,20 @@ def submit_registration(payload: schemas.RegistrationSubmitRequest, db: Session 
         "queue_number": reg.queue_number,
         "current_state": reg.current_state,
     }
+
+
+@router.patch("/{registration_id}/state")
+def update_registration_state(registration_id: int, payload: schemas.RegistrationStateUpdateRequest, db: Session = Depends(get_db)):
+    try:
+        reg = crud.update_registration_state(db, registration_id, payload.current_state)
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+
+    return {
+        "registration_id": reg.id,
+        "patient_id": reg.patient_id,
+        "current_state": reg.current_state,
+    }

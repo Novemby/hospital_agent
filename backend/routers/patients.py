@@ -43,6 +43,8 @@ def get_patients(dept: Optional[str] = Query(None), db: Session = Depends(get_db
             "allergy_history": p.allergy_history,
             "is_deaf": p.is_deaf,
             "dept": dept_name,
+            "registration_id": latest_reg.id if latest_reg else None,
+            "current_state": latest_reg.current_state if latest_reg else None,
             "triage_struct": triage_struct,
         })
     return result
@@ -65,6 +67,8 @@ def get_patient(patient_id: int, db: Session = Depends(get_db)):
         "allergy_history": patient.allergy_history,
         "is_deaf": patient.is_deaf,
         "dept": None,
+        "registration_id": None,
+        "current_state": None,
     }
 
 
@@ -82,6 +86,13 @@ class SyncRecordRequest(BaseModel):
     prescriptions: list
     diagnosis: Optional[str] = None
     doctor_id: Optional[Union[int, str]] = None
+    registration_id: Optional[int] = None
+
+
+class SyncChatMessageRequest(BaseModel):
+    sender_type: str
+    content: str
+    registration_id: Optional[int] = None
 
 
 def _resolve_doctor_id(db: Session, doctor_id: Optional[Union[int, str]]) -> Optional[int]:
@@ -102,49 +113,91 @@ def _resolve_doctor_id(db: Session, doctor_id: Optional[Union[int, str]]) -> Opt
     return doctor.id if doctor else None
 
 
-@router.post("/{patient_id}/sync_record")
-def sync_patient_record(patient_id: int, req: SyncRecordRequest, db: Session = Depends(get_db)):
-    # 1. 查找该患者最近的一次挂号记录
-    reg = db.execute(
-        text("SELECT id FROM biz_registration WHERE patient_id = :pid ORDER BY created_at DESC LIMIT 1"),
+def _get_registration_context(db: Session, patient_id: int, registration_id: Optional[int] = None):
+    if registration_id is not None:
+        return db.execute(
+            text("""
+                SELECT r.id, r.patient_id, r.department, r.current_state, r.triage_symptoms, s.doctor_id AS schedule_doctor_id
+                FROM biz_registration r
+                LEFT JOIN biz_schedule s ON s.id = r.schedule_id
+                WHERE r.id = :rid AND r.patient_id = :pid
+                LIMIT 1
+            """),
+            {"rid": registration_id, "pid": patient_id}
+        ).fetchone()
+
+    return db.execute(
+        text("""
+            SELECT r.id, r.patient_id, r.department, r.current_state, r.triage_symptoms, s.doctor_id AS schedule_doctor_id
+            FROM biz_registration r
+            LEFT JOIN biz_schedule s ON s.id = r.schedule_id
+            WHERE r.patient_id = :pid
+            ORDER BY r.created_at DESC, r.id DESC
+            LIMIT 1
+        """),
         {"pid": patient_id}
     ).fetchone()
+
+
+def _fallback_medical_history(db: Session, registration_id: int, triage_symptoms: Optional[str]) -> str:
+    latest_patient_message = db.execute(
+        text("""
+            SELECT content
+            FROM biz_chat_message
+            WHERE registration_id = :rid AND sender_type = 'pat'
+            ORDER BY created_at DESC, id DESC
+            LIMIT 1
+        """),
+        {"rid": registration_id}
+    ).fetchone()
+
+    if latest_patient_message and latest_patient_message[0]:
+        return str(latest_patient_message[0]).strip()
+
+    if triage_symptoms and str(triage_symptoms).strip():
+        return str(triage_symptoms).strip()
+
+    return "待补充"
+
+
+@router.post("/{patient_id}/sync_record")
+def sync_patient_record(patient_id: int, req: SyncRecordRequest, db: Session = Depends(get_db)):
+    reg = _get_registration_context(db, patient_id, req.registration_id)
 
     if not reg:
         return {"success": False, "message": "未找到挂号记录"}
 
-    reg_id = reg[0]
-    # 将处方数组转为 JSON 字符串存入 treatment_plan 字段
+    reg_id = reg.id
     plan_json = json.dumps(req.prescriptions, ensure_ascii=False)
+    medical_history = (req.medical_history or "").strip() or _fallback_medical_history(db, reg_id, reg.triage_symptoms)
+    diagnosis = (req.diagnosis or "").strip() or "待确诊"
 
-    # 2. 检查本次挂号是否已经存在病历记录
     existing = db.execute(
-        text("SELECT id FROM biz_medical_record WHERE registration_id = :rid"),
+        text("SELECT id, doctor_id FROM biz_medical_record WHERE registration_id = :rid"),
         {"rid": reg_id}
     ).fetchone()
 
     resolved_doctor_id = _resolve_doctor_id(db, req.doctor_id)
+    doctor_id = resolved_doctor_id or reg.schedule_doctor_id or (existing.doctor_id if existing else None) or 1
 
     try:
         if existing:
-            # 存在则更新病历和处方
             db.execute(
                 text("""UPDATE biz_medical_record
                         SET chief_complaint = :mc,
                             diagnosis = :diagnosis,
                             treatment_plan = :plan,
-                            doctor_id = COALESCE(:doctor_id, doctor_id)
+                            doctor_id = :doctor_id
                         WHERE id = :id"""),
                 {
-                    "mc": req.medical_history,
-                    "diagnosis": req.diagnosis or "待确诊",
+                    "mc": medical_history,
+                    "diagnosis": diagnosis,
                     "plan": plan_json,
-                    "doctor_id": resolved_doctor_id,
-                    "id": existing[0]
+                    "doctor_id": doctor_id,
+                    "id": existing.id
                 }
             )
         else:
-            doctor_id = resolved_doctor_id or 1
             db.execute(
                 text("""INSERT INTO biz_medical_record 
                         (registration_id, doctor_id, chief_complaint, diagnosis, treatment_plan) 
@@ -152,18 +205,95 @@ def sync_patient_record(patient_id: int, req: SyncRecordRequest, db: Session = D
                 {
                     "rid": reg_id,
                     "doctor_id": doctor_id,
-                    "mc": req.medical_history,
-                    "diagnosis": req.diagnosis or "待确诊",
+                    "mc": medical_history,
+                    "diagnosis": diagnosis,
                     "plan": plan_json
                 }
             )
         db.commit()
         print(f"✅ 成功将患者 {patient_id} 的病历和处方落盘到 MySQL")
-        return {"success": True}
+        return {"success": True, "registration_id": reg_id}
     except Exception as e:
         db.rollback()
         print(f"❌ 病历落盘失败: {e}")
         return {"success": False, "message": str(e)}
+
+
+@router.get("/{patient_id}/messages")
+def get_patient_messages(patient_id: int, registration_id: Optional[int] = Query(None), db: Session = Depends(get_db)):
+    reg = _get_registration_context(db, patient_id, registration_id)
+    if not reg:
+        return []
+
+    rows = db.execute(
+        text("""
+            SELECT id, sender_type, content, created_at
+            FROM biz_chat_message
+            WHERE registration_id = :rid
+            ORDER BY created_at ASC, id ASC
+        """),
+        {"rid": reg.id}
+    ).fetchall()
+
+    return [
+        {
+            "id": row.id,
+            "type": row.sender_type,
+            "content": row.content,
+            "created_at": row.created_at.isoformat() if row.created_at else None,
+            "registration_id": reg.id,
+        }
+        for row in rows
+    ]
+
+
+@router.post("/{patient_id}/messages")
+def sync_patient_message(patient_id: int, req: SyncChatMessageRequest, db: Session = Depends(get_db)):
+    sender_type = (req.sender_type or "").strip()
+    content = (req.content or "").strip()
+    if sender_type not in {"pat", "doc"}:
+        raise HTTPException(status_code=400, detail="sender_type 仅支持 pat 或 doc")
+    if not content:
+        raise HTTPException(status_code=400, detail="消息内容不能为空")
+
+    reg = _get_registration_context(db, patient_id, req.registration_id)
+    if not reg:
+        raise HTTPException(status_code=404, detail="未找到挂号记录，无法保存消息")
+
+    try:
+        db.execute(
+            text("""
+                INSERT INTO biz_chat_message (registration_id, sender_type, content)
+                VALUES (:rid, :sender_type, :content)
+            """),
+            {"rid": reg.id, "sender_type": sender_type, "content": content}
+        )
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"消息落库失败: {e}")
+
+    saved = db.execute(
+        text("""
+            SELECT id, sender_type, content, created_at
+            FROM biz_chat_message
+            WHERE registration_id = :rid
+            ORDER BY id DESC
+            LIMIT 1
+        """),
+        {"rid": reg.id}
+    ).fetchone()
+
+    return {
+        "success": True,
+        "message": {
+            "id": saved.id,
+            "type": saved.sender_type,
+            "content": saved.content,
+            "created_at": saved.created_at.isoformat() if saved.created_at else None,
+            "registration_id": reg.id,
+        }
+    }
 
 
 # =====================================================================

@@ -29,6 +29,8 @@ function normalizePatient(patient) {
         age: calculateAge(patient.birth_date),
         genderText: patient.gender === 1 ? '男' : (patient.gender === 0 ? '女' : '未知'),
         dept: patient.dept || patient.department || '',
+        registrationId: patient.registration_id || patient.registrationId || null,
+        currentState: patient.current_state || patient.currentState || '',
         isDeaf: patient.is_deaf,
         allergy: patient.allergy_history,
         triageStruct: patient.triage_struct || null,
@@ -38,6 +40,71 @@ function normalizePatient(patient) {
         // 后端同步到医生端的列表本身就是当前待诊患者，必须清掉旧缓存里的“已结束”标记
         is_finished: false,
     };
+}
+
+function normalizeMessage(message) {
+    return {
+        ...message,
+        id: message.id ?? Date.now(),
+        created_at: message.created_at ?? Date.now(),
+    };
+}
+
+function messageKey(message) {
+    if (message.registration_id && message.id) {
+        return `db:${message.registration_id}:${message.id}`;
+    }
+    if (message.id) {
+        return `local:${message.id}`;
+    }
+    return `${message.type || message.sender_type}:${message.content || ''}:${message.created_at || ''}`;
+}
+
+function mergeMessages(existingMessages = [], incomingMessages = []) {
+    const mergedMap = new Map();
+
+    [...existingMessages, ...incomingMessages]
+        .filter(Boolean)
+        .map(normalizeMessage)
+        .forEach(message => {
+            const key = messageKey(message);
+            const previous = mergedMap.get(key);
+            if (previous) {
+                mergedMap.set(key, { ...previous, ...message });
+                return;
+            }
+
+            const normalizedType = message.type || message.sender_type || '';
+            const normalizedContent = (message.content || '').trim();
+            const currentTime = new Date(message.created_at || 0).getTime();
+
+            const duplicateKey = Array.from(mergedMap.keys()).find(existingKey => {
+                const existingMessage = mergedMap.get(existingKey);
+                const existingType = existingMessage.type || existingMessage.sender_type || '';
+                const existingContent = (existingMessage.content || '').trim();
+                const existingTime = new Date(existingMessage.created_at || 0).getTime();
+                return (
+                    existingType === normalizedType &&
+                    existingContent === normalizedContent &&
+                    Math.abs(existingTime - currentTime) <= 5000
+                );
+            });
+
+            if (duplicateKey) {
+                const duplicateMessage = mergedMap.get(duplicateKey) || {};
+                mergedMap.set(duplicateKey, { ...duplicateMessage, ...message });
+                return;
+            }
+
+            mergedMap.set(key, message);
+        });
+
+    return Array.from(mergedMap.values()).sort((a, b) => {
+        const timeA = new Date(a.created_at || 0).getTime();
+        const timeB = new Date(b.created_at || 0).getTime();
+        if (timeA !== timeB) return timeA - timeB;
+        return Number(a.id || 0) - Number(b.id || 0);
+    });
 }
 
 // 从后端获取患者列表并更新本地存储（合并更新，保留本地数据）
@@ -126,9 +193,18 @@ function upsertPatient(patient) {
     const patients = getPatients();
     const index = patients.findIndex(p => p.id == patient.id);
     if (index >= 0) {
-        patients[index] = { ...patients[index], ...patient };
+        const existingPatient = patients[index];
+        const nextPatient = { ...existingPatient, ...patient };
+        if (existingPatient.messages || patient.messages) {
+            nextPatient.messages = mergeMessages(existingPatient.messages || [], patient.messages || []);
+        }
+        patients[index] = nextPatient;
     } else {
-        patients.push(patient);
+        const nextPatient = { ...patient };
+        if (nextPatient.messages) {
+            nextPatient.messages = mergeMessages([], nextPatient.messages);
+        }
+        patients.push(nextPatient);
     }
     savePatients(patients);
 }
@@ -138,13 +214,55 @@ function addMessage(patientId, message) {
     const patient = getPatientById(patientId);
     if (patient) {
         if (!patient.messages) patient.messages = [];
-        patient.messages.push({
+        patient.messages.push(normalizeMessage({
             id: Date.now(),
             created_at: Date.now(),
             ...message
-        });
+        }));
         upsertPatient(patient);
     }
+}
+
+async function saveChatMessage(patientId, message, registrationId = null) {
+    const response = await fetch(`${API_BASE_URL}/patients/${patientId}/messages`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            sender_type: message.type,
+            content: message.content,
+            registration_id: registrationId
+        })
+    });
+    if (!response.ok) {
+        let detail = `HTTP ${response.status}`;
+        try {
+            const data = await response.json();
+            detail = data.detail || data.message || detail;
+        } catch (e) {
+            console.warn('解析消息落库错误失败', e);
+        }
+        throw new Error(detail);
+    }
+    return response.json();
+}
+
+async function syncPatientMessagesFromBackend(patientId, registrationId = null) {
+    const url = new URL(`${API_BASE_URL}/patients/${patientId}/messages`);
+    if (registrationId) {
+        url.searchParams.set('registration_id', registrationId);
+    }
+    const response = await fetch(url.toString());
+    if (!response.ok) {
+        throw new Error(`获取消息失败: ${response.status}`);
+    }
+
+    const backendMessages = await response.json();
+    const patient = getPatientById(patientId);
+    if (!patient) return backendMessages;
+
+    patient.messages = mergeMessages(patient.messages || [], backendMessages);
+    upsertPatient(patient);
+    return patient.messages;
 }
 
 // 统一导出
@@ -153,5 +271,7 @@ export {
     getPatientById,
     upsertPatient,
     addMessage,
+    saveChatMessage,
+    syncPatientMessagesFromBackend,
     syncPatientsFromBackend
 };

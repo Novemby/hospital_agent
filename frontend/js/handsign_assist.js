@@ -1,5 +1,5 @@
 import { createApp, ref, computed, onMounted, onUnmounted, nextTick } from 'vue';
-import { getPatientById, addMessage, upsertPatient } from './services/patientService.js';
+import { getPatientById, addMessage, saveChatMessage, syncPatientMessagesFromBackend, upsertPatient } from './services/patientService.js?v=20260401-1';
 import { SignLanguageAgent } from './services/signLanguageAgent.js';
 
 const app = createApp({
@@ -8,6 +8,7 @@ const app = createApp({
         const urlParams = new URLSearchParams(window.location.search);
         const patientId = urlParams.get('patientId') || '';
         const doctorId = urlParams.get('doctorId') || '';
+        const registrationId = urlParams.get('registrationId') || '';
 
         const patientInfo = ref(null);
         const chatMessages = ref([]);
@@ -106,8 +107,15 @@ const app = createApp({
 
 
         // 初始化加载患者数据
-        const loadPatientData = () => {
+        const loadPatientData = async (syncBackend = false) => {
             if (patientId) {
+                if (syncBackend) {
+                    try {
+                        await syncPatientMessagesFromBackend(patientId, registrationId || null);
+                    } catch (e) {
+                        console.warn('从后端同步消息失败', e);
+                    }
+                }
                 // 每次都从 localStorage 获取最新数据
                 const freshPatient = getPatientById(patientId);
                 if (freshPatient) {
@@ -133,12 +141,12 @@ const app = createApp({
         let refreshInterval = null;
 
         onMounted(() => {
-            loadPatientData();
+            loadPatientData(true);
             window.addEventListener('storage', handleStorageChange);
 
             // 每2秒刷新一次消息列表
             refreshInterval = setInterval(() => {
-                loadPatientData();
+                loadPatientData(false);
             }, 2000);
 
             setTimeout(() => {
@@ -403,7 +411,13 @@ const app = createApp({
             }
 
             addMessage(patientId, { type: 'pat', content: finalSentence });
-            loadPatientData();
+            try {
+                await saveChatMessage(patientId, { type: 'pat', content: finalSentence }, registrationId || null);
+                await loadPatientData(true);
+            } catch (e) {
+                console.warn('患者消息落库失败', e);
+                await loadPatientData(false);
+            }
             isPolishing.value = false;
         };
 

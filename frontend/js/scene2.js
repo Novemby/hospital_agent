@@ -1,5 +1,5 @@
 import { createApp, ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue';
-import { getPatients, getPatientById, upsertPatient, addMessage, syncPatientsFromBackend } from './services/patientService.js';
+import { getPatients, getPatientById, upsertPatient, addMessage, saveChatMessage, syncPatientMessagesFromBackend, syncPatientsFromBackend } from './services/patientService.js?v=20260401-1';
 import { doctorLoginAPI, setCurrentDoctor, getCurrentDoctor, clearAuth } from './services/authService.js';
 import { SignLanguageAgent } from './services/signLanguageAgent.js';
 
@@ -154,18 +154,40 @@ const app = createApp({
         };
 
 
-        const sendDoctorVoiceMessage = () => {
+        const loadSelectedPatientMessages = async () => {
+            if (!selectedPatient.value) return;
+            try {
+                await syncPatientMessagesFromBackend(selectedPatient.value.id, selectedPatient.value.registrationId);
+                const allPatients = getPatients();
+                const activePatients = allPatients.filter(p => !p.is_finished);
+                patients.value = doctorDept.value
+                    ? activePatients.filter(p => p.dept === doctorDept.value)
+                    : activePatients;
+            } catch (e) {
+                console.warn('同步医患消息失败', e);
+            }
+        };
+
+        const sendDoctorVoiceMessage = async () => {
             if (!doctorVoiceText.value.trim() || !selectedPatient.value) return;
+            const patientId = selectedPatient.value.id;
+            const registrationId = selectedPatient.value.registrationId;
+            const content = doctorVoiceText.value.trim();
 
             console.log('📤 发送消息前，当前患者消息数:', selectedPatient.value.messages?.length || 0);
 
-            // 1. 将消息存入数据库 / LocalStorage
-            addMessage(selectedPatient.value.id, { type: 'doc', content: doctorVoiceText.value });
+            addMessage(patientId, { type: 'doc', content });
             doctorVoiceText.value = '';
 
             console.log('💾 消息已保存到localStorage');
 
-            // 直接从localStorage重新加载，不触发后端同步
+            try {
+                await saveChatMessage(patientId, { type: 'doc', content }, registrationId);
+                await loadSelectedPatientMessages();
+            } catch (e) {
+                console.warn('医生消息落库失败', e);
+            }
+
             const allPatients = getPatients();
             const activePatients = allPatients.filter(p => !p.is_finished);
             patients.value = doctorDept.value
@@ -261,8 +283,9 @@ const app = createApp({
             }
         };
 
-        watch(selectedPatientId, () => {
+        watch(selectedPatientId, async () => {
             hydrateDraftFromSelectedPatient();
+            await loadSelectedPatientMessages();
         });
 
         onMounted(() => {
@@ -274,6 +297,7 @@ const app = createApp({
                 loadPatients();
                 patientSyncInterval = window.setInterval(loadPatients, 15000);
                 hydrateDraftFromSelectedPatient();
+                loadSelectedPatientMessages();
             }
         });
 
@@ -315,7 +339,8 @@ const app = createApp({
                             medical_history: medicalHistoryDraft.value || '',
                             diagnosis: diagnosisDraft.value || '',
                             prescriptions: selectedPatient.value.prescriptions || [],
-                            doctor_id: currentDoctor?.id || null
+                            doctor_id: currentDoctor?.id || null,
+                            registration_id: selectedPatient.value.registrationId || null
                         })
                     });
                     const result = await response.json().catch(() => ({}));
@@ -346,6 +371,8 @@ const app = createApp({
         const finishConsultation = async () => {
             if (!selectedPatient.value) return;
             if (!confirm(`确定要结束患者【${selectedPatient.value.name}】的就诊吗？结束后的患者将从待诊列表中移除。`)) return;
+            const patientId = Number(selectedPatient.value.id);
+            const registrationId = selectedPatient.value.registrationId;
 
             // Agent 记忆沉淀：触发后端对本次就诊的总结与固化
             try {
@@ -369,9 +396,30 @@ const app = createApp({
                 console.warn('收集聊天记录失败', e);
             }
 
+            try {
+                if (registrationId) {
+                    const response = await fetch(`http://localhost:8000/api/registration/${registrationId}/state`, {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ current_state: 'COMPLETED' })
+                    });
+                    if (!response.ok) {
+                        const result = await response.json().catch(() => ({}));
+                        const detail = result.detail || result.message || `HTTP ${response.status}`;
+                        alert(`结束就诊失败：${detail}`);
+                        return;
+                    }
+                }
+            } catch (e) {
+                console.warn('更新挂号状态失败', e);
+                alert('结束就诊失败：后端未能更新挂号状态');
+                return;
+            }
+
             selectedPatient.value.is_finished = true;
+            selectedPatient.value.currentState = 'COMPLETED';
             upsertPatient(selectedPatient.value);
-            loadPatients();
+            await loadPatients();
 
             if (patients.value.length > 0) {
                 selectPatient(patients.value[0].id);
@@ -413,7 +461,7 @@ const app = createApp({
             const left = (screen.width - width) / 2;
             const top = (screen.height - height) / 2;
             const features = `width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes`;
-            handsignWindow = window.open(`handsign_assist.html?patientId=${selectedPatient.value.id}&doctorId=${doctorId.value}`, 'handsign_assist', features);
+            handsignWindow = window.open(`handsign_assist.html?patientId=${selectedPatient.value.id}&doctorId=${doctorId.value}&registrationId=${selectedPatient.value.registrationId || ''}`, 'handsign_assist', features);
             if (handsignWindow) {
                 isHandsignOpen.value = true;
                 if (windowCheckInterval) clearInterval(windowCheckInterval);

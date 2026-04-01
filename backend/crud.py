@@ -201,3 +201,14 @@ def create_registration(db: Session, patient_id: int, department: str, schedule_
     db.commit()
     db.refresh(reg)
     return reg
+
+
+def update_registration_state(db: Session, registration_id: int, current_state: str) -> models.Registration:
+    reg = db.query(models.Registration).filter(models.Registration.id == registration_id).first()
+    if not reg:
+        raise HTTPException(status_code=404, detail="挂号记录不存在")
+
+    reg.current_state = current_state
+    db.commit()
+    db.refresh(reg)
+    return reg
