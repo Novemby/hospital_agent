@@ -43,6 +43,11 @@ const app = createApp({
         let handsignWindow = null;
         let windowCheckInterval = null;
 
+        // ========== 3.5. 历史病例查看功能 ==========
+        const showHistoryModal = ref(false);
+        const historicalRecords = ref([]);
+        const loadingHistory = ref(false);
+
         // ========== 4. 医生语音转文字功能 (实时识别) ==========
         const isRecordingVoiceForDoc = ref(false);
         const doctorVoiceText = ref('');
@@ -478,6 +483,31 @@ const app = createApp({
 
         const backToDoctor = () => {};
 
+        // 🌟 新增：加载患者历史病例
+        const loadHistoricalRecords = async () => {
+            if (!selectedPatient.value) return;
+            loadingHistory.value = true;
+            try {
+                const response = await fetch(`http://localhost:8000/api/patients/${selectedPatient.value.id}/records`);
+                if (response.ok) {
+                    historicalRecords.value = await response.json();
+                } else {
+                    historicalRecords.value = [];
+                }
+            } catch (e) {
+                console.error("获取历史病例失败", e);
+                historicalRecords.value = [];
+            } finally {
+                loadingHistory.value = false;
+            }
+        };
+
+        // 🌟 新增：打开历史病例弹窗
+        const openHistoryModal = async () => {
+            showHistoryModal.value = true;
+            await loadHistoricalRecords();
+        };
+
         return {
             view, doctorId, doctorPwd, doctorDept, loginLoading,
             patients, selectedPatientId, selectedPatient,
@@ -495,7 +525,9 @@ const app = createApp({
             doctorVoiceText, doctorRecognizedText, isRecordingVoiceForDoc,
             startDoctorVoiceRecording, stopDoctorVoiceRecording,
             sendDoctorVoiceMessage,
-            chatMessages, chatContainerDoc, formatTime
+            chatMessages, chatContainerDoc, formatTime,
+            // 🌟 历史病例相关
+            showHistoryModal, historicalRecords, loadingHistory, openHistoryModal
         };
     },
     template: `
@@ -574,6 +606,10 @@ const app = createApp({
                                     <p class="text-sm text-gray-500 mt-1">ID: {{ selectedPatient.id }} | 挂号科室: {{ selectedPatient.dept }}</p>
                                 </div>
                                 <div class="flex items-center gap-3">
+                                    <button @click="openHistoryModal" class="bg-amber-50 text-amber-700 hover:bg-amber-100 px-4 py-2 rounded-xl font-medium transition shadow-sm flex items-center gap-2">
+                                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+                                        查看历史病例
+                                    </button>
                                     <button v-if="selectedPatient.isDeaf || selectedPatient.is_deaf" @click="openPatientAssist" :class="isHandsignOpen ? 'bg-indigo-100 text-indigo-800' : 'bg-indigo-50 text-indigo-700 hover:bg-indigo-100'" class="flex items-center gap-2 px-4 py-2 rounded-xl font-medium transition shadow-sm">
                                         <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path d="M10 12a2 2 0 100-4 2 2 0 000 4z"></path><path fill-rule="evenodd" d="M.458 10C1.732 5.943 5.522 3 10 3s8.268 2.943 9.542 7c-1.274 4.057-5.064 7-9.542 7S1.732 14.057.458 10zM14 10a4 4 0 11-8 0 4 4 0 018 0z" clip-rule="evenodd"></path></svg>
                                         {{ isHandsignOpen ? '诊间辅助已在辅屏打开' : '打开诊间手语辅助' }}
@@ -781,6 +817,75 @@ const app = createApp({
                             </div>
                         </div>
                     </div>
+                </div>
+            </div>
+
+            <!-- 🌟 历史病例查看弹窗 -->
+            <div v-if="showHistoryModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" @click.self="showHistoryModal = false">
+                <div class="bg-white rounded-2xl p-6 max-w-2xl w-full m-4 shadow-2xl max-h-[80vh] overflow-y-auto">
+                    <div class="flex justify-between items-center mb-4 sticky top-0 bg-white pb-2 border-b">
+                        <h3 class="text-xl font-bold flex items-center gap-2 text-amber-700">
+                            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+                            <span>历史病例记录</span>
+                        </h3>
+                        <div class="text-sm text-gray-500">患者：{{ selectedPatient?.name }} (ID: {{ selectedPatient?.id }})</div>
+                    </div>
+
+                    <div v-if="loadingHistory" class="text-center py-12 text-amber-600">
+                        <svg class="animate-spin h-8 w-8 mx-auto mb-2" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        正在加载历史病例...
+                    </div>
+
+                    <div v-else class="space-y-4">
+                        <div v-if="historicalRecords.length === 0" class="text-gray-400 text-center py-12 bg-gray-50 rounded-xl">
+                            <svg class="w-16 h-16 mx-auto mb-3 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+                            <p class="text-lg">该患者暂无历史病例记录</p>
+                        </div>
+
+                        <!-- 动态循环渲染历史病例 -->
+                        <div v-for="(record, index) in historicalRecords" :key="index" class="border-l-4 border-amber-500 bg-amber-50/50 rounded-r-xl p-4 shadow-sm hover:shadow-md transition-shadow">
+                            <div class="flex justify-between items-start mb-3 pb-2 border-b border-amber-200">
+                                <div>
+                                    <span class="font-bold text-amber-900 text-lg">{{ record.department }} 门诊</span>
+                                    <span class="ml-3 text-xs bg-amber-100 text-amber-700 px-2 py-1 rounded-full">只读</span>
+                                </div>
+                                <span class="text-sm text-gray-600">{{ record.visit_date }}</span>
+                            </div>
+
+                            <div class="space-y-3">
+                                <div class="bg-white rounded-lg p-3 border border-amber-100">
+                                    <div class="text-xs text-gray-500 mb-1 font-medium">主诉</div>
+                                    <div class="text-sm text-gray-800 whitespace-pre-line">{{ record.chief_complaint || '未记录' }}</div>
+                                </div>
+
+                                <div class="bg-white rounded-lg p-3 border border-amber-100">
+                                    <div class="text-xs text-gray-500 mb-1 font-medium">诊断</div>
+                                    <div class="text-sm text-gray-800 font-medium">{{ record.diagnosis || '未记录' }}</div>
+                                </div>
+
+                                <div v-if="record.treatment_plan && record.treatment_plan.length > 0" class="bg-white rounded-lg p-3 border border-amber-100">
+                                    <div class="text-xs text-gray-500 mb-2 font-medium">处方</div>
+                                    <div class="space-y-2">
+                                        <div v-for="(rx, rIndex) in record.treatment_plan" :key="rIndex" class="flex items-start gap-2 text-sm bg-green-50 p-2 rounded border border-green-100">
+                                            <span class="font-bold text-green-800 min-w-[120px]">{{ rx.drug }}</span>
+                                            <span class="text-gray-600">{{ rx.dosage }}</span>
+                                            <span class="text-gray-500 text-xs">{{ rx.usage }}</span>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="text-xs text-amber-700 flex items-center gap-1 mt-2">
+                                    <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clip-rule="evenodd"></path></svg>
+                                    接诊医生：{{ record.doctor_name }}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <button @click="showHistoryModal = false" class="mt-6 w-full bg-gray-200 text-gray-700 px-4 py-2.5 rounded-lg hover:bg-gray-300 font-medium transition-colors">关闭</button>
                 </div>
             </div>
         </div>
