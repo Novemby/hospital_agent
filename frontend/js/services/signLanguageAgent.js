@@ -25,6 +25,8 @@ export class SignLanguageAgent {
             onSequenceUpdate: () => {},
             onStatusChange: () => {},
             onHeadGesture: () => {},
+            // "开始结束"手势切换回调：参数为新状态 true=开始识别 false=停止识别
+            onToggleByGesture: () => {},
             ...options
         };
         this.apiUrl = this.options.apiUrl;
@@ -91,6 +93,19 @@ export class SignLanguageAgent {
         // Holistic 连接常量（绘制用）
         this.POSE_CONNECTIONS = [[0,1],[1,2],[2,3],[3,7],[0,4],[4,5],[5,6],[6,8],[9,10],[11,12],[11,13],[13,15],[12,14],[14,16],[11,23],[12,24],[23,24]];
         this.HAND_CONNECTIONS = [[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[0,9],[9,10],[10,11],[11,12],[0,13],[13,14],[14,15],[15,16],[0,17],[17,18],[18,19],[19,20],[5,9],[9,13],[13,17]];
+
+        // 后台"开始结束"手势监听（摄像头开启后始终运行，与 continuousMode 无关）
+        this.watchState = 'WATCH_IDLE';   // 'WATCH_IDLE' | 'WATCH_COLLECTING'
+        this.watchBuffer = [];
+        this.watchStopCount = 0;
+        this.watchLastCapture = 0;
+        this.watchPending = false;
+        this.watchLastHandPositions = null;  // 独立速度计算，不与连续模式共享
+        this.WATCH_START_THRESHOLD = 0.025;
+        this.WATCH_STOP_THRESHOLD  = 0.008;
+        this.WATCH_STOP_FRAMES     = 8;
+        this.WATCH_MIN_FRAMES      = 10;
+        this.WATCH_MAX_FRAMES      = 80;
 
         this.initHolistic = this.initHolistic.bind(this);
         this.onHolisticResults = this.onHolisticResults.bind(this);
@@ -301,6 +316,85 @@ export class SignLanguageAgent {
                 this.stopRecording();
             }
         }
+
+        // 始终运行后台监听，检测"开始结束"控制手势
+        this._processWatchGesture(results);
+    }
+
+    // 后台监听"开始结束"手势，与 continuousMode 无关，摄像头开启后始终运行
+    _processWatchGesture(results) {
+        if (!this.cameraStarted || this.watchPending) return;
+        const hasHand = !!(results.leftHandLandmarks || results.rightHandLandmarks);
+        const now = Date.now();
+
+        // 独立速度计算，不影响连续模式的 lastHandPositions
+        let velocity = 0;
+        if (hasHand) {
+            const center = this.calculateHandCenter(results.rightHandLandmarks || results.leftHandLandmarks);
+            if (this.watchLastHandPositions && center) {
+                velocity = this.calculateDistance(center, this.watchLastHandPositions);
+            }
+            if (center) this.watchLastHandPositions = center;
+        } else {
+            this.watchLastHandPositions = null;
+        }
+
+        if (this.watchState === 'WATCH_IDLE') {
+            if (hasHand && velocity > this.WATCH_START_THRESHOLD) {
+                this.watchState = 'WATCH_COLLECTING';
+                this.watchBuffer = [];
+                this.watchStopCount = 0;
+                this.watchLastCapture = 0;
+            }
+        } else if (this.watchState === 'WATCH_COLLECTING') {
+            if (now - this.watchLastCapture >= 33) {
+                this.watchBuffer.push(this.extractLandmarks(results));
+                this.watchLastCapture = now;
+            }
+            if (!hasHand || velocity < this.WATCH_STOP_THRESHOLD) {
+                this.watchStopCount++;
+                if (this.watchStopCount >= this.WATCH_STOP_FRAMES) {
+                    this.watchState = 'WATCH_IDLE';
+                    const frames = [...this.watchBuffer];
+                    this.watchBuffer = [];
+                    this.watchStopCount = 0;
+                    if (frames.length >= this.WATCH_MIN_FRAMES) {
+                        this._sendWatchFrames(frames);
+                    }
+                }
+            } else {
+                this.watchStopCount = 0;
+            }
+            if (this.watchBuffer.length >= this.WATCH_MAX_FRAMES) {
+                this.watchState = 'WATCH_IDLE';
+                const frames = [...this.watchBuffer];
+                this.watchBuffer = [];
+                this.watchStopCount = 0;
+                this._sendWatchFrames(frames);
+            }
+        }
+    }
+
+    async _sendWatchFrames(frames) {
+        this.watchPending = true;
+        try {
+            const response = await fetch(`${this.recognitionApiUrl}/recognize`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ frames: frames.map(f => f.flat()), confidence_threshold: 0.5 })
+            });
+            const result = await response.json();
+            if (result.word === '开始结束' || result.prediction === '开始结束') {
+                const nowActive = !this.continuousMode;
+                if (nowActive) {
+                    this.startContinuous();
+                } else {
+                    this.stopContinuous();
+                }
+                this.options.onToggleByGesture(nowActive);
+            }
+        } catch (_) {}
+        this.watchPending = false;
     }
 
     detectHeadGesture(faceLandmarks) {
@@ -440,6 +534,7 @@ export class SignLanguageAgent {
     }
 
     displayResult(prediction, confidence) {
+        if (prediction === '无意义词') return;
         // 连续识别模式：跳过稳定性投票，直接输出，仅做短时去重
         if (this.continuousMode) {
             const now = Date.now();

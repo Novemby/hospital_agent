@@ -16,29 +16,36 @@
         }
     </script>
     <style>
-        body {
-            background: #f1f5f9;
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
-        }
-        .video-container { position: relative; aspect-ratio: 4/3; background: #000; border-radius: 12px; overflow: hidden; }
-        #webcam, #canvas { width: 100%; height: 100%; object-fit: cover; position: absolute; top: 0; left: 0; }
-        .overlay { position: absolute; top: 10px; left: 10px; background: rgba(0,0,0,0.7); color: white; padding: 4px 12px; border-radius: 20px; font-size: 12px; pointer-events: none; z-index: 10; }
+        body { background: #f1f5f9; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif; }
+        /* video-container 与挂号界面完全一致 */
+        .video-container { position: relative; border-radius: 12px; border: 3px solid transparent; transition: border-color 0.4s ease, box-shadow 0.4s ease; }
+        .video-container .video-inner { border-radius: 9px; overflow: hidden; position: relative; }
+        .video-container.camera-active { border-color: #94a3b8; }
+        .video-container.camera-detecting { border-color: #22c55e; box-shadow: 0 0 0 4px rgba(34,197,94,0.25), 0 0 20px rgba(34,197,94,0.3); animation: borderPulse 2s ease-in-out infinite; }
+        @keyframes borderPulse { 0%,100% { box-shadow: 0 0 0 4px rgba(34,197,94,0.25), 0 0 20px rgba(34,197,94,0.2); } 50% { box-shadow: 0 0 0 6px rgba(34,197,94,0.15), 0 0 30px rgba(34,197,94,0.4); } }
+        #webcam { width: 100%; display: block; }
+        #canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+        /* overlay 与挂号界面完全一致 */
+        .overlay { position: absolute; top: 10px; left: 10px; background: rgba(0,0,0,0.7); color: white; padding: 4px 12px; border-radius: 20px; font-size: 12px; pointer-events: none; transition: background 0.3s ease; }
         .overlay.recording { background: #ef4444; animation: pulse 1s infinite; }
+        .overlay.detecting { background: linear-gradient(135deg, #7c3aed, #4f46e5); animation: pulse 1.5s ease-in-out infinite; }
+        .overlay.result { background: #16a34a; font-size: 16px; font-weight: bold; padding: 6px 16px; animation: popIn 0.3s ease-out; }
         @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.7; } }
-        .status-dot { width: 8px; height: 8px; border-radius: 50%; background: #cbd5e1; display: inline-block; margin-right: 6px; }
-        .status-dot.active { background: #22c55e; }
+        @keyframes popIn { 0% { transform: scale(0.7); opacity: 0; } 70% { transform: scale(1.1); } 100% { transform: scale(1); opacity: 1; } }
+        /* status-dot 与挂号界面完全一致 */
+        .status-dot { width: 8px; height: 8px; border-radius: 50%; background: #cbd5e1; flex-shrink: 0; display: inline-block; }
+        .status-dot.active { background: #22c55e; box-shadow: 0 0 0 3px rgba(34,197,94,0.3); animation: dotPulse 1.5s ease-in-out infinite; }
+        @keyframes dotPulse { 0%,100% { box-shadow: 0 0 0 3px rgba(34,197,94,0.3); } 50% { box-shadow: 0 0 0 6px rgba(34,197,94,0.1); } }
+        /* detection-dot */
+        .detection-item { display: flex; align-items: center; gap: 4px; margin-bottom: 2px; }
+        .detection-dot { width: 8px; height: 8px; border-radius: 50%; background: #cbd5e1; display: inline-block; }
+        .detection-dot.active { background: #22c55e; }
+        /* 其他 */
         .word-tag { display: inline-block; background: #dcfce7; padding: 4px 12px; border-radius: 20px; margin: 4px; font-size: 14px; }
-        .word-tag button { margin-left: 6px; color: #ef4444; background: none; border: none; cursor: pointer; font-size: 12px; }
-        .candidate-btn { display: flex; flex-direction: column; align-items: center; padding: 8px 12px; background: white; border: 1px solid #e2e8f0; border-radius: 12px; cursor: pointer; transition: all 0.2s; min-width: 70px; }
-        .candidate-btn.top1 { background: #f0fdf4; border-color: #22c55e; }
-        .candidate-btn .label { font-weight: bold; }
-        .candidate-btn .conf { font-size: 0.7rem; color: #64748b; }
-        .auto-confirm-hint { background: #fef9c3; border-radius: 8px; padding: 8px; margin-top: 8px; }
-        .countdown-progress { transition: width 1s linear; }
     </style>
 </head>
 <body class="p-6">
     <div id="app"></div>
-    <script type="module" src="./js/handsign_assist.js?v=20260401-1"></script>
+    <script type="module" src="./js/handsign_assist.js?v=rebuild-001"></script>
 </body>
 </html>

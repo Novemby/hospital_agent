@@ -1,0 +1,594 @@
+{
+  "num_classes": 73,
+  "checkpoint": "D:\\a_newproject\\hospital_agent\\artifacts\\newdata_73_pipeline_fullrun\\student\\checkpoints\\best_robust_multistream_newdata73.pth",
+  "by_index": {
+    "0": {
+      "index": 0,
+      "model_label": "043",
+      "display_name": "发生",
+      "source": "base_66"
+    },
+    "1": {
+      "index": 1,
+      "model_label": "044",
+      "display_name": "出现",
+      "source": "base_66"
+    },
+    "2": {
+      "index": 2,
+      "model_label": "051",
+      "display_name": "好转",
+      "source": "base_66"
+    },
+    "3": {
+      "index": 3,
+      "model_label": "056",
+      "display_name": "解除",
+      "source": "base_66"
+    },
+    "4": {
+      "index": 4,
+      "model_label": "079",
+      "display_name": "反复（重复）",
+      "source": "base_66"
+    },
+    "5": {
+      "index": 5,
+      "model_label": "080",
+      "display_name": "延长",
+      "source": "base_66"
+    },
+    "6": {
+      "index": 6,
+      "model_label": "082",
+      "display_name": "避免",
+      "source": "base_66"
+    },
+    "7": {
+      "index": 7,
+      "model_label": "085",
+      "display_name": "困难",
+      "source": "base_66"
+    },
+    "8": {
+      "index": 8,
+      "model_label": "086",
+      "display_name": "容易",
+      "source": "base_66"
+    },
+    "9": {
+      "index": 9,
+      "model_label": "087",
+      "display_name": "紧张",
+      "source": "base_66"
+    },
+    "10": {
+      "index": 10,
+      "model_label": "088",
+      "display_name": "稳定",
+      "source": "base_66"
+    },
+    "11": {
+      "index": 11,
+      "model_label": "104",
+      "display_name": "醒",
+      "source": "base_66"
+    },
+    "12": {
+      "index": 12,
+      "model_label": "127",
+      "display_name": "沉重",
+      "source": "base_66"
+    },
+    "13": {
+      "index": 13,
+      "model_label": "134",
+      "display_name": "冷",
+      "source": "base_66"
+    },
+    "14": {
+      "index": 14,
+      "model_label": "135",
+      "display_name": "热",
+      "source": "base_66"
+    },
+    "15": {
+      "index": 15,
+      "model_label": "136",
+      "display_name": "暖",
+      "source": "base_66"
+    },
+    "16": {
+      "index": 16,
+      "model_label": "139",
+      "display_name": "饱",
+      "source": "base_66"
+    },
+    "17": {
+      "index": 17,
+      "model_label": "140",
+      "display_name": "饿",
+      "source": "base_66"
+    },
+    "18": {
+      "index": 18,
+      "model_label": "144",
+      "display_name": "好",
+      "source": "base_66"
+    },
+    "19": {
+      "index": 19,
+      "model_label": "145",
+      "display_name": "坏",
+      "source": "base_66"
+    },
+    "20": {
+      "index": 20,
+      "model_label": "242",
+      "display_name": "我",
+      "source": "base_66"
+    },
+    "21": {
+      "index": 21,
+      "model_label": "243",
+      "display_name": "你",
+      "source": "base_66"
+    },
+    "22": {
+      "index": 22,
+      "model_label": "244",
+      "display_name": "他（她、它）",
+      "source": "base_66"
+    },
+    "23": {
+      "index": 23,
+      "model_label": "245",
+      "display_name": "我们",
+      "source": "base_66"
+    },
+    "24": {
+      "index": 24,
+      "model_label": "246",
+      "display_name": "你们",
+      "source": "base_66"
+    },
+    "25": {
+      "index": 25,
+      "model_label": "247",
+      "display_name": "他们",
+      "source": "base_66"
+    },
+    "26": {
+      "index": 26,
+      "model_label": "261",
+      "display_name": "头（脑）",
+      "source": "base_66"
+    },
+    "27": {
+      "index": 27,
+      "model_label": "264",
+      "display_name": "脸",
+      "source": "base_66"
+    },
+    "28": {
+      "index": 28,
+      "model_label": "265",
+      "display_name": "眼",
+      "source": "base_66"
+    },
+    "29": {
+      "index": 29,
+      "model_label": "266",
+      "display_name": "耳",
+      "source": "base_66"
+    },
+    "30": {
+      "index": 30,
+      "model_label": "267",
+      "display_name": "鼻",
+      "source": "base_66"
+    },
+    "31": {
+      "index": 31,
+      "model_label": "268",
+      "display_name": "口",
+      "source": "base_66"
+    },
+    "32": {
+      "index": 32,
+      "model_label": "269",
+      "display_name": "舌",
+      "source": "base_66"
+    },
+    "33": {
+      "index": 33,
+      "model_label": "270",
+      "display_name": "牙齿",
+      "source": "base_66"
+    },
+    "34": {
+      "index": 34,
+      "model_label": "271",
+      "display_name": "脚",
+      "source": "base_66"
+    },
+    "35": {
+      "index": 35,
+      "model_label": "272",
+      "display_name": "心",
+      "source": "base_66"
+    },
+    "36": {
+      "index": 36,
+      "model_label": "312",
+      "display_name": "医生（大夫）",
+      "source": "base_66"
+    },
+    "37": {
+      "index": 37,
+      "model_label": "313",
+      "display_name": "护士",
+      "source": "base_66"
+    },
+    "38": {
+      "index": 38,
+      "model_label": "314",
+      "display_name": "零",
+      "source": "base_66"
+    },
+    "39": {
+      "index": 39,
+      "model_label": "315",
+      "display_name": "一",
+      "source": "base_66"
+    },
+    "40": {
+      "index": 40,
+      "model_label": "316",
+      "display_name": "二",
+      "source": "base_66"
+    },
+    "41": {
+      "index": 41,
+      "model_label": "317",
+      "display_name": "三",
+      "source": "base_66"
+    },
+    "42": {
+      "index": 42,
+      "model_label": "318",
+      "display_name": "四",
+      "source": "base_66"
+    },
+    "43": {
+      "index": 43,
+      "model_label": "319",
+      "display_name": "五",
+      "source": "base_66"
+    },
+    "44": {
+      "index": 44,
+      "model_label": "320",
+      "display_name": "六",
+      "source": "base_66"
+    },
+    "45": {
+      "index": 45,
+      "model_label": "321",
+      "display_name": "七",
+      "source": "base_66"
+    },
+    "46": {
+      "index": 46,
+      "model_label": "322",
+      "display_name": "八",
+      "source": "base_66"
+    },
+    "47": {
+      "index": 47,
+      "model_label": "323",
+      "display_name": "九",
+      "source": "base_66"
+    },
+    "48": {
+      "index": 48,
+      "model_label": "324",
+      "display_name": "十",
+      "source": "base_66"
+    },
+    "49": {
+      "index": 49,
+      "model_label": "325",
+      "display_name": "恶心",
+      "source": "base_66"
+    },
+    "50": {
+      "index": 50,
+      "model_label": "326",
+      "display_name": "痛",
+      "source": "base_66"
+    },
+    "51": {
+      "index": 51,
+      "model_label": "327",
+      "display_name": "头晕",
+      "source": "base_66"
+    },
+    "52": {
+      "index": 52,
+      "model_label": "328",
+      "display_name": "炎",
+      "source": "base_66"
+    },
+    "53": {
+      "index": 53,
+      "model_label": "329",
+      "display_name": "肩膀",
+      "source": "base_66"
+    },
+    "54": {
+      "index": 54,
+      "model_label": "330",
+      "display_name": "痒",
+      "source": "base_66"
+    },
+    "55": {
+      "index": 55,
+      "model_label": "331",
+      "display_name": "发烧",
+      "source": "base_66"
+    },
+    "56": {
+      "index": 56,
+      "model_label": "332",
+      "display_name": "呼吸",
+      "source": "base_66"
+    },
+    "57": {
+      "index": 57,
+      "model_label": "333",
+      "display_name": "破裂",
+      "source": "base_66"
+    },
+    "58": {
+      "index": 58,
+      "model_label": "334",
+      "display_name": "腹泻",
+      "source": "base_66"
+    },
+    "59": {
+      "index": 59,
+      "model_label": "335",
+      "display_name": "咳嗽",
+      "source": "base_66"
+    },
+    "60": {
+      "index": 60,
+      "model_label": "336",
+      "display_name": "流血",
+      "source": "base_66"
+    },
+    "61": {
+      "index": 61,
+      "model_label": "337",
+      "display_name": "巨大",
+      "source": "base_66"
+    },
+    "62": {
+      "index": 62,
+      "model_label": "338",
+      "display_name": "肿瘤",
+      "source": "base_66"
+    },
+    "63": {
+      "index": 63,
+      "model_label": "339",
+      "display_name": "一天",
+      "source": "base_66"
+    },
+    "64": {
+      "index": 64,
+      "model_label": "340",
+      "display_name": "一周",
+      "source": "base_66"
+    },
+    "65": {
+      "index": 65,
+      "model_label": "341",
+      "display_name": "一个月",
+      "source": "base_66"
+    },
+    "66": {
+      "index": 66,
+      "model_label": "无意义词",
+      "display_name": "无意义词",
+      "source": "null_class"
+    },
+    "67": {
+      "index": 67,
+      "model_label": "不",
+      "display_name": "不",
+      "source": "new_data"
+    },
+    "68": {
+      "index": 68,
+      "model_label": "不发烧",
+      "display_name": "不发烧",
+      "source": "new_data"
+    },
+    "69": {
+      "index": 69,
+      "model_label": "不咳嗽",
+      "display_name": "不咳嗽",
+      "source": "new_data"
+    },
+    "70": {
+      "index": 70,
+      "model_label": "不头晕",
+      "display_name": "不头晕",
+      "source": "new_data"
+    },
+    "71": {
+      "index": 71,
+      "model_label": "不恶心",
+      "display_name": "不恶心",
+      "source": "new_data"
+    },
+    "72": {
+      "index": 72,
+      "model_label": "开始结束",
+      "display_name": "开始结束",
+      "source": "new_data"
+    }
+  },
+  "model_label_to_index": {
+    "043": 0,
+    "044": 1,
+    "051": 2,
+    "056": 3,
+    "079": 4,
+    "080": 5,
+    "082": 6,
+    "085": 7,
+    "086": 8,
+    "087": 9,
+    "088": 10,
+    "104": 11,
+    "127": 12,
+    "134": 13,
+    "135": 14,
+    "136": 15,
+    "139": 16,
+    "140": 17,
+    "144": 18,
+    "145": 19,
+    "242": 20,
+    "243": 21,
+    "244": 22,
+    "245": 23,
+    "246": 24,
+    "247": 25,
+    "261": 26,
+    "264": 27,
+    "265": 28,
+    "266": 29,
+    "267": 30,
+    "268": 31,
+    "269": 32,
+    "270": 33,
+    "271": 34,
+    "272": 35,
+    "312": 36,
+    "313": 37,
+    "314": 38,
+    "315": 39,
+    "316": 40,
+    "317": 41,
+    "318": 42,
+    "319": 43,
+    "320": 44,
+    "321": 45,
+    "322": 46,
+    "323": 47,
+    "324": 48,
+    "325": 49,
+    "326": 50,
+    "327": 51,
+    "328": 52,
+    "329": 53,
+    "330": 54,
+    "331": 55,
+    "332": 56,
+    "333": 57,
+    "334": 58,
+    "335": 59,
+    "336": 60,
+    "337": 61,
+    "338": 62,
+    "339": 63,
+    "340": 64,
+    "341": 65,
+    "无意义词": 66,
+    "不": 67,
+    "不发烧": 68,
+    "不咳嗽": 69,
+    "不头晕": 70,
+    "不恶心": 71,
+    "开始结束": 72
+  },
+  "display_name_to_index": {
+    "发生": 0,
+    "出现": 1,
+    "好转": 2,
+    "解除": 3,
+    "反复（重复）": 4,
+    "延长": 5,
+    "避免": 6,
+    "困难": 7,
+    "容易": 8,
+    "紧张": 9,
+    "稳定": 10,
+    "醒": 11,
+    "沉重": 12,
+    "冷": 13,
+    "热": 14,
+    "暖": 15,
+    "饱": 16,
+    "饿": 17,
+    "好": 18,
+    "坏": 19,
+    "我": 20,
+    "你": 21,
+    "他（她、它）": 22,
+    "我们": 23,
+    "你们": 24,
+    "他们": 25,
+    "头（脑）": 26,
+    "脸": 27,
+    "眼": 28,
+    "耳": 29,
+    "鼻": 30,
+    "口": 31,
+    "舌": 32,
+    "牙齿": 33,
+    "脚": 34,
+    "心": 35,
+    "医生（大夫）": 36,
+    "护士": 37,
+    "零": 38,
+    "一": 39,
+    "二": 40,
+    "三": 41,
+    "四": 42,
+    "五": 43,
+    "六": 44,
+    "七": 45,
+    "八": 46,
+    "九": 47,
+    "十": 48,
+    "恶心": 49,
+    "痛": 50,
+    "头晕": 51,
+    "炎": 52,
+    "肩膀": 53,
+    "痒": 54,
+    "发烧": 55,
+    "呼吸": 56,
+    "破裂": 57,
+    "腹泻": 58,
+    "咳嗽": 59,
+    "流血": 60,
+    "巨大": 61,
+    "肿瘤": 62,
+    "一天": 63,
+    "一周": 64,
+    "一个月": 65,
+    "无意义词": 66,
+    "不": 67,
+    "不发烧": 68,
+    "不咳嗽": 69,
+    "不头晕": 70,
+    "不恶心": 71,
+    "开始结束": 72
+  }
+}

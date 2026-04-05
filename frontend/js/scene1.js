@@ -73,13 +73,29 @@ const app = createApp({
                 statusText.value = `✅ 识别到「${word}」(${(confidence * 100).toFixed(0)}%)`;
                 overlayText.value = `✓ ${word}`;
                 overlayClass.value = 'overlay result';
-                assistantPhase.value = 'LISTENING';
+                // 不覆盖 REPLY 状态，避免 AI 问题消失
+                if (assistantPhase.value !== 'REPLY') {
+                    assistantPhase.value = 'LISTENING';
+                }
             },
             onSentenceComplete: (words) => {
                 // 句子结束：只提示用户确认，不自动发送
                 statusText.value = '✅ 识别完成，请确认后发送';
                 overlayText.value = '等待确认';
                 overlayClass.value = 'overlay';
+            },
+            onToggleByGesture: (active) => {
+                continuousActive.value = active;
+                if (active) {
+                    assistantPhase.value = 'LISTENING';
+                    statusText.value = '🟢 识别中，请比划手语...';
+                    overlayText.value = '等待手势';
+                    overlayClass.value = 'overlay detecting';
+                } else {
+                    statusText.value = '⏸ 识别已停止，比划"开始结束"可重新开始';
+                    overlayText.value = '已停止';
+                    overlayClass.value = 'overlay';
+                }
             },
             onSequenceUpdate: (seq) => {
                 vueWordSequence.value = seq;
@@ -101,7 +117,7 @@ const app = createApp({
                 } else if (status === 'continuousReady') {
                     statusText.value = '🟢 连续识别中，请比划手语...';
                     overlayText.value = '等待手势';
-                    overlayClass.value = 'overlay';
+                    overlayClass.value = 'overlay detecting';
                 } else if (status === 'tooShort') {
                     statusText.value = '时间有点短，请再比划一次 😊';
                 } else if (status === 'recognitionFailed') {
@@ -430,6 +446,8 @@ const app = createApp({
             } finally {
                 agentLoading.value = false;
                 agentInputText.value = '';
+                continuousWords.value = [];
+                agent.clearSentenceBuffer();
             }
         };
 
@@ -464,6 +482,10 @@ const app = createApp({
             agentState.value = 'INIT';
             assistantPhase.value = 'WELCOME';
             assistantDisplayText.value = '';
+            // 自动启动摄像头，等 DOM 渲染完成后再初始化
+            if (!cameraStarted.value) {
+                nextTick(() => startCamera());
+            }
         };
 
         const goBack = () => {
@@ -482,8 +504,8 @@ const app = createApp({
                 cameraStarted.value = true;
                 recordDisabled.value = false;
                 continuousActive.value = false;
-                statusText.value = '摄像头已就绪，点击"开始识别"';
-                overlayText.value = '等待开始';
+                statusText.value = '摄像头已就绪，在身体左侧拍手可自动开始识别';
+                overlayText.value = '等待开始手势';
                 overlayClass.value = 'overlay';
             } catch (error) {
                 alert('摄像头启动失败: ' + error.message);
@@ -496,7 +518,7 @@ const app = createApp({
             assistantPhase.value = 'LISTENING';
             statusText.value = '🟢 识别中，请比划手语...';
             overlayText.value = '等待手势';
-            overlayClass.value = 'overlay';
+            overlayClass.value = 'overlay detecting';
         };
 
         const toggleContinuous = () => {
@@ -505,11 +527,15 @@ const app = createApp({
                 agent.clearSentenceBuffer();
                 continuousActive.value = false;
                 statusText.value = '连续识别已暂停';
+                overlayText.value = '已停止';
+                overlayClass.value = 'overlay';
             } else {
                 agent.startContinuous();
                 continuousActive.value = true;
                 assistantPhase.value = 'LISTENING';
                 statusText.value = '🟢 连续识别已启动，请比划手语...';
+                overlayText.value = '等待手势';
+                overlayClass.value = 'overlay detecting';
             }
         };
 
@@ -517,6 +543,22 @@ const app = createApp({
             agentInputText.value = '';
             continuousWords.value = [];
             agent.clearSentenceBuffer();
+        };
+
+        // 在函数定义完成后，将手势回调重新绑定到完整的 UI 函数，确保按钮状态同步
+        agent.options.onToggleByGesture = (active) => {
+            if (active) {
+                continuousActive.value = true;
+                assistantPhase.value = 'LISTENING';
+                statusText.value = '🟢 识别中，请比划手语...';
+                overlayText.value = '等待手势';
+                overlayClass.value = 'overlay detecting';
+            } else {
+                continuousActive.value = false;
+                statusText.value = '⏸ 识别已停止，身体左侧拍手可重新开始';
+                overlayText.value = '已停止';
+                overlayClass.value = 'overlay';
+            }
         };
 
         const toggleRecording = () => {
@@ -802,14 +844,16 @@ const app = createApp({
                             <!-- 左侧：摄像头区 -->
                             <div class="bg-white rounded-2xl shadow-sm p-4">
                                 <h2 class="text-lg font-bold mb-4 flex items-center gap-2">📹 请对着摄像头比划</h2>
-                                <div class="video-container relative">
-                                    <video id="webcam" autoplay playsinline class="w-full rounded-lg"></video>
+                                <div :class="['video-container', cameraStarted ? (continuousActive ? 'camera-detecting' : 'camera-active') : '']">
+                                    <div class="video-inner">
+                                    <video id="webcam" autoplay playsinline class="w-full"></video>
                                     <canvas id="canvas" class="absolute top-0 left-0 w-full h-full"></canvas>
                                     <div :class="overlayClass" id="overlay">{{ overlayText }}</div>
                                     <div class="detection-status absolute top-2 right-2 bg-white/90 p-2 rounded-lg text-xs hidden md:block">
                                         <div class="detection-item"><span class="detection-dot" id="poseDot"></span>身体</div>
                                         <div class="detection-item"><span class="detection-dot" id="leftHandDot"></span>左手</div>
                                         <div class="detection-item"><span class="detection-dot" id="rightHandDot"></span>右手</div>
+                                    </div>
                                     </div>
                                 </div>
                                 <div class="controls flex gap-2 mt-4">
@@ -822,7 +866,7 @@ const app = createApp({
                                     <span id="statusText">{{ statusText }}</span>
                                 </div>
                                 <div class="tips-box mt-3 p-3 bg-blue-50 rounded-lg text-xs text-gray-600">
-                                    <strong>💡 使用方式：</strong> 开启摄像头后点击"开始识别"，识别到的词汇会出现在右侧，确认无误后点击"确认发送"。
+                                    <strong>💡 使用方式：</strong> 摄像头自动开启，比划"开始结束"手势即可开始/停止识别，识别到的词汇会出现在右侧，确认无误后点击"确认发送"。
                                 </div>
 
                                 <!-- 🌟 优化一：实时症状感知卡片（消除虚无感） -->

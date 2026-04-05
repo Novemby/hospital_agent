@@ -93,6 +93,23 @@ def _has_core_ready(session: dict) -> bool:
     return bool(session.get("slots", {}).get("department"))
 
 
+def _infer_department_from_symptom(symptom_text: str) -> Optional[str]:
+    mapping = [
+        (["头", "脑", "头晕", "头痛", "头疼", "偏头"], "神经内科"),
+        (["心", "胸", "心跳", "心悸", "胸闷", "胸痛"], "心内科"),
+        (["肚", "腹", "胃", "肠", "恶心", "呕吐", "腹泻", "消化"], "消化内科"),
+        (["骨", "关节", "腰", "颈", "肩", "膝", "腿", "手", "脚", "扭伤", "骨折", "酸痛"], "骨科"),
+        (["皮肤", "疹", "痒", "红斑", "过敏"], "皮肤科"),
+        (["眼", "视力", "眼睛"], "眼科"),
+        (["耳", "鼻", "喉", "咽", "听力"], "耳鼻喉科"),
+        (["发热", "发烧", "咳嗽", "感冒", "流涕", "乏力", "不适"], "内科"),
+    ]
+    for keywords, dept in mapping:
+        if any(k in symptom_text for k in keywords):
+            return dept
+    return None
+
+
 def _should_proceed_to_slots(session: dict, text: str) -> bool:
     if not _has_core_ready(session):
         return False
@@ -258,9 +275,22 @@ def registration_agent_chat(payload: schemas.RegistrationAgentChatRequest, db: S
                                                "collect_body_part")
 
     if not session["slots"].get("department"):
-        session["state"] = "COLLECT_INFO"
-        return helpers.make_agent_response("我还不知道你想挂哪个科室，请直接选择，或向我描述你的症状。", session,
-                                           ["department"], settings.DEPARTMENTS, "collect_department")
+        # 症状信息已完整，尝试从症状自动推断科室
+        struct = session["symptom_struct"]
+        inferred = decision.get("recommended_department") or decision.get("department")
+        if not inferred:
+            symptom_text = f"{struct.get('body_part', '')} {struct.get('primary_symptom', '')} {struct.get('original_text', '')}".strip()
+            inferred = _infer_department_from_symptom(symptom_text)
+
+        if inferred:
+            session["slots"]["department"] = inferred
+            allow_query_slots = True  # 重新允许进入号源查询
+        else:
+            session["state"] = "COLLECT_INFO"
+            return helpers.make_agent_response(
+                "根据您的症状，请选择就诊科室：",
+                session, ["department"], settings.DEPARTMENTS, "collect_department"
+            )
 
     # 5. 静默查询号源
     if session["state"] in ["INIT", "COLLECT_INFO", "QUERY_SLOTS"]:

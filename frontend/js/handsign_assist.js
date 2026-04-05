@@ -190,10 +190,84 @@ const app = createApp({
 
         // 连续识别模式状态
         const continuousActive = ref(false);
+        const continuousStopNotice = ref(false);
         const continuousWords = ref([]);
 
         const waitingForHeadGesture = ref(false);
         let headGestureTimeout = null;
+
+        // agent 在 setup() 内构造，回调直接闭包捕获上方所有 ref（与挂号界面相同结构）
+        const agent = new SignLanguageAgent({
+            apiUrl: 'http://localhost:5000',
+            onResult: (result) => {
+                currentWord.value = result.prediction;
+                currentConfidence.value = `${(result.confidence * 100).toFixed(1)}%`;
+                if (result.topPredictions && result.topPredictions.length) {
+                    currentCandidates.value = result.topPredictions;
+                    currentCandidateIndex.value = 0;
+                } else {
+                    currentCandidates.value = [];
+                }
+            },
+            onSequenceUpdate: (seq) => { vueWordSequence.value = seq; },
+            onWordRecognized: (word) => {
+                if (continuousActive.value) {
+                    continuousWords.value.push(word);
+                    statusText.value = `✓ 识别到「${word}」`;
+                }
+            },
+            onStatusChange: (status, data) => {
+                if (status === 'recordingStart') {
+                    statusText.value = continuousActive.value ? '检测到手势，识别中...' : '正在捕捉动作...';
+                    overlayText.value = '';
+                    overlayClass.value = 'overlay hidden';
+                } else if (status === 'sending') {
+                    overlayText.value = '';
+                    overlayClass.value = 'overlay hidden';
+                } else if (status === 'resultReady') {
+                    overlayText.value = data.prediction;
+                    overlayClass.value = 'overlay bg-green-500/80';
+                } else if (status === 'continuousReady') {
+                    statusText.value = '🟢 连续识别中，等待手势...';
+                } else if (status === 'tooShort' || status === 'recognitionFailed') {
+                    statusText.value = '没看清，请重试 😊';
+                    overlayClass.value = 'overlay hidden';
+                } else if (status === 'wordConfirmed') {
+                    statusText.value = `✓ 已记录「${data.word}」`;
+                    overlayClass.value = 'overlay hidden';
+                }
+            },
+            onToggleByGesture: (active) => {
+                continuousActive.value = active;
+                if (active) {
+                    continuousStopNotice.value = false;
+                    statusText.value = '🟢 识别中，请比划手语...';
+                } else {
+                    continuousStopNotice.value = true;
+                    statusText.value = '⏸ 连续识别已停止';
+                    setTimeout(() => {
+                        continuousStopNotice.value = false;
+                        if (!continuousActive.value) {
+                            statusText.value = '比划"开始结束"可重新开始';
+                        }
+                    }, 3000);
+                }
+            },
+            onHeadGesture: (gesture) => {
+                if (!waitingForHeadGesture.value) return;
+                if (gesture.type === 'nod') {
+                    const c = currentCandidates.value[currentCandidateIndex.value];
+                    if (c) { agent.confirmWord(c.label); waitingForHeadGesture.value = false; clearHeadGestureTimer(); }
+                } else if (gesture.type === 'shake') {
+                    if (currentCandidates.value.length > 1) {
+                        let next = (currentCandidateIndex.value + 1) % currentCandidates.value.length;
+                        currentCandidateIndex.value = next;
+                        currentWord.value = currentCandidates.value[next].label;
+                        statusText.value = `切换为「${currentCandidates.value[next].label}」，请点头确认`;
+                    }
+                }
+            }
+        });
 
         const startHeadGestureWaiting = () => {
             waitingForHeadGesture.value = true;
@@ -214,92 +288,11 @@ const app = createApp({
             agent.enableHeadGesture(false);
         };
 
-        const agent = new SignLanguageAgent({
-            apiUrl: 'http://localhost:5000',
-            onResult: (result) => {
-                currentWord.value = result.prediction;
-                currentConfidence.value = `${(result.confidence * 100).toFixed(1)}%`;
-                if (result.topPredictions && result.topPredictions.length) {
-                    currentCandidates.value = result.topPredictions;
-                    currentCandidateIndex.value = 0;
-                    startHeadGestureWaiting();
-                } else {
-                    currentCandidates.value = [];
-                }
-            },
-            onSequenceUpdate: (seq) => {
-                vueWordSequence.value = seq;
-            },
-            onStatusChange: (status, data) => {
-                if (status === 'recordingStart') {
-                    statusText.value = '📹 正在捕捉动作...';
-                    overlayText.value = '';
-                    overlayClass.value = 'overlay hidden';
-                } else if (status === 'sending') {
-                    statusText.value = `🔄 AI 正在理解中...`;
-                    overlayText.value = '';
-                    overlayClass.value = 'overlay hidden';
-                } else if (status === 'resultReady') {
-                    statusText.value = '👉 请点头确认添加，或摇头切换';
-                    overlayText.value = data.prediction;
-                    overlayClass.value = 'overlay bg-green-500/80';
-                    startHeadGestureWaiting();
-                } else if (status === 'tooShort' || status === 'recognitionFailed') {
-                    statusText.value = '没看清，请重试 😊';
-                    overlayClass.value = 'overlay hidden';
-                } else if (status === 'wordConfirmed') {
-                    statusText.value = `✓ 已记录「${data.word}」`;
-                    overlayClass.value = 'overlay hidden';
-                } else if (status === 'continuousStart') {
-                    statusText.value = '🤟 连续识别已启动，请开始比划';
-                    overlayClass.value = 'overlay hidden';
-                } else if (status === 'continuousReady') {
-                    statusText.value = '🤟 连续识别中，等待手势...';
-                    overlayClass.value = 'overlay hidden';
-                } else if (status === 'continuousStop') {
-                    statusText.value = '连续识别已停止';
-                    overlayClass.value = 'overlay hidden';
-                }
-            },
-            onHeadGesture: (gesture) => {
-                if (!waitingForHeadGesture.value) return;
-                if (gesture.type === 'nod') {
-                    const currentCandidate = currentCandidates.value[currentCandidateIndex.value];
-                    if (currentCandidate) {
-                        agent.confirmWord(currentCandidate.label);
-                        waitingForHeadGesture.value = false;
-                        clearHeadGestureTimer();
-                    }
-                } else if (gesture.type === 'shake') {
-                    if (currentCandidates.value.length > 1) {
-                        let nextIdx = currentCandidateIndex.value + 1;
-                        if (nextIdx >= currentCandidates.value.length) nextIdx = 0;
-                        currentCandidateIndex.value = nextIdx;
-                        const newCandidate = currentCandidates.value[nextIdx];
-                        currentWord.value = newCandidate.label;
-                        statusText.value = `切换为「${newCandidate.label}」，请点头确认`;
-                    }
-                }
-            },
-            // 连续识别回调
-            onWordRecognized: (word, confidence) => {
-                if (continuousActive.value) {
-                    // 追加新识别的词汇，保持时间顺序
-                    continuousWords.value.push(word);
-                    statusText.value = `✓ 识别到「${word}」`;
-                }
-            },
-            onSentenceComplete: (words) => {
-                // 句子完成回调，但我们已经通过 onWordRecognized 实时添加了
-                // 这里不需要做任何操作，避免覆盖已有结果
-            }
-        });
-
         const startCamera = async () => {
             try {
                 await agent.startCamera('webcam', 'canvas');
                 cameraStarted.value = true;
-                statusText.value = '就绪，可以开始比划了';
+                statusText.value = '摄像头已就绪，比划"开始结束"手势可自动开始识别';
             } catch (error) {
                 statusText.value = '摄像头启动失败';
             }
@@ -320,8 +313,15 @@ const app = createApp({
 
         const stopContinuousRecognition = () => {
             continuousActive.value = false;
+            continuousStopNotice.value = true;
+            statusText.value = '⏸ 连续识别已停止';
             agent.stopContinuous();
-            // 停止后不清空结果，保留识别内容
+            setTimeout(() => {
+                continuousStopNotice.value = false;
+                if (!continuousActive.value) {
+                    statusText.value = '比划"开始结束"可重新开始';
+                }
+            }, 3000);
         };
 
         const clearContinuousWords = () => {
@@ -444,13 +444,13 @@ const app = createApp({
             patientId, doctorId, patientInfo, chatMessages, chatContainer,
             vueWordSequence, currentWord, statusText, overlayText, overlayClass, cameraStarted,
             textInput, patientReminder, isPolishing,
-            continuousActive, continuousWords,
+            continuousActive, continuousWords, continuousStopNotice,
             // 新增返回的状态和方法
             selectedText, showExplainBtn, explainBtnStyle, showExplainModal, explanationContent, isExplaining,
             handleMouseUp, explainSelected, closeExplainModal,
             startCamera, toggleRecording, clearSequence, polishAndSend, sendTextInput,
             startContinuousRecognition, stopContinuousRecognition, clearContinuousWords, removeWord,
-            agent, formatTimeDisplay
+            formatTimeDisplay
         };
     },
     template: `
@@ -522,46 +522,33 @@ const app = createApp({
                         <span class="w-1.5 h-5 bg-[#3b82f6] rounded-full"></span>
                         请面对屏幕，用手语回答医生
                     </h2>
-                    
-                    <div class="video-container relative flex-1 rounded-2xl overflow-hidden bg-[#7f7f7f] min-h-[300px] shadow-inner">
-                        <video id="webcam" autoplay playsinline class="w-full h-full object-cover"></video>
-                        <canvas id="canvas" class="absolute top-0 left-0 w-full h-full"></canvas>
 
-                        <!-- 识别状态提示（右上角小标签） -->
-                        <div v-if="overlayText" class="absolute top-4 right-4 bg-gradient-to-r from-[#22c55e] to-[#16a34a] text-white px-4 py-2 rounded-xl text-sm font-bold shadow-lg flex items-center gap-2 animate-fade-in">
-                            <span class="w-2 h-2 rounded-full bg-white animate-pulse"></span>
-                            {{ overlayText }}
-                        </div>
-
-                        <!-- 右上角小提示 -->
-                        <div class="absolute top-4 left-4 bg-[#4b5563]/80 backdrop-blur-sm p-3 rounded-xl text-xs text-white space-y-2 border border-white/10">
-                            <div class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-[#22c55e]" id="poseDot"></span>身体追踪</div>
-                            <div class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-[#3b82f6]" id="leftHandDot"></span>左手捕捉</div>
-                            <div class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-[#a855f7]" id="rightHandDot"></span>右手捕捉</div>
+                    <div :class="['video-container', cameraStarted ? (continuousActive ? 'camera-detecting' : 'camera-active') : '']">
+                        <div class="video-inner" style="min-height:260px;">
+                            <video id="webcam" autoplay playsinline class="w-full"></video>
+                            <canvas id="canvas" class="absolute top-0 left-0 w-full h-full"></canvas>
+                            <div :class="overlayClass" id="overlay">{{ overlayText }}</div>
+                            <div class="detection-status absolute top-2 right-2 bg-white/90 p-2 rounded-lg text-xs">
+                                <div class="detection-item"><span class="detection-dot" id="poseDot"></span>身体</div>
+                                <div class="detection-item"><span class="detection-dot" id="leftHandDot"></span>左手</div>
+                                <div class="detection-item"><span class="detection-dot" id="rightHandDot"></span>右手</div>
+                            </div>
                         </div>
                     </div>
 
-                    <!-- 操作控制区 -->
-                    <div class="mt-5 flex flex-col gap-3 shrink-0">
-                        <!-- 连续识别模式切换 -->
-                        <button v-if="!continuousActive" @click="startContinuousRecognition" :disabled="!cameraStarted"
-                                class="w-full py-3.5 rounded-xl font-bold text-base text-white transition-all shadow-sm bg-gradient-to-r from-[#3b82f6] to-[#2563eb] hover:from-[#2563eb] hover:to-[#1d4ed8] disabled:opacity-50 disabled:cursor-not-allowed flex justify-center items-center gap-2">
-                            <span class="text-xl">🤟</span>
-                            开启连续识别
-                        </button>
-                        <button v-else @click="stopContinuousRecognition"
-                                class="w-full py-3.5 rounded-xl font-bold text-base text-white transition-all shadow-sm bg-gradient-to-r from-[#ef4444] to-[#dc2626] hover:from-[#dc2626] hover:to-[#b91c1c] flex justify-center items-center gap-2">
-                            <span class="text-xl">⏹</span>
-                            暂停识别
-                        </button>
+                    <div class="controls flex gap-2 mt-4">
+                        <button v-if="!cameraStarted" class="flex-1 bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700" @click="startCamera">📷 开启摄像头</button>
+                        <button v-else-if="!continuousActive" class="flex-1 bg-green-600 text-white py-2 rounded-lg hover:bg-green-700" @click="startContinuousRecognition">🤟 开始识别</button>
+                        <button v-else class="flex-1 bg-orange-500 text-white py-2 rounded-lg hover:bg-orange-600" @click="stopContinuousRecognition">⏸ 暂停</button>
+                    </div>
 
-                        <div class="bg-white border border-[#e2e8f0] rounded-xl p-3.5 flex items-center gap-3 shadow-sm">
-                            <div class="relative flex h-2.5 w-2.5">
-                              <span v-if="continuousActive" class="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#22c55e] opacity-75"></span>
-                              <span class="relative inline-flex rounded-full h-2.5 w-2.5" :class="cameraStarted ? (continuousActive ? 'bg-[#22c55e]' : 'bg-[#3b82f6]') : 'bg-gray-300'"></span>
-                            </div>
-                            <span class="text-sm font-medium text-gray-600">{{ statusText }}</span>
-                        </div>
+                    <div class="status-bar flex items-center gap-2 mt-3 p-2 rounded-lg text-sm" :class="continuousActive ? 'bg-green-50 border border-green-200' : 'bg-gray-100'">
+                        <span class="status-dot" :class="{'active': cameraStarted && continuousActive}"></span>
+                        <span>{{ statusText }}</span>
+                    </div>
+
+                    <div class="mt-3 p-3 bg-blue-50 rounded-lg text-xs text-gray-600">
+                        <strong>💡 使用方式：</strong> “在身体左侧拍手”即可自动开始/停止识别，识别到的词汇会出现在右侧。
                     </div>
                 </div>
 

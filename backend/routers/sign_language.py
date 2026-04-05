@@ -16,12 +16,12 @@ _BASE = os.path.normpath(
 MODEL_PATH = os.path.join(
     _BASE,
     "robust_multistream_checkpoints",
-    "best_robust_multistream_graformer.pth",
+    "best_robust_multistream_newdata73.pth",
 )
 LABEL_PATH = os.path.join(
     _BASE,
     "robust_multistream_checkpoints",
-    "label_mapping.json",
+    "sign_label_mapping_73.json",
 )
 
 _model_instance = None

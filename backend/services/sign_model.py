@@ -870,7 +870,17 @@ class SignLanguageModel:
 
     def load_model(self, model_path: str, label_path: str) -> None:
         with open(label_path, "r", encoding="utf-8") as file:
-            self.label_map = json.load(file)
+            raw = json.load(file)
+        # 兼容两种标注格式：
+        # 旧格式: {"词语": index, ...}
+        # 新格式: {"num_classes": N, "by_index": {"0": {"display_name": "词语", "index": 0, ...}}, ...}
+        if "by_index" in raw:
+            self.label_map = {
+                entry["display_name"]: entry["index"]
+                for entry in raw["by_index"].values()
+            }
+        else:
+            self.label_map = raw
         self.idx_to_word = {value: key for key, value in self.label_map.items()}
 
         checkpoint = torch.load(model_path, map_location=self.device)
