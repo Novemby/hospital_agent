@@ -382,6 +382,24 @@ const app = createApp({
             }
         };
 
+        const resetAgentConversation = () => {
+            sessionId.value = `session_${currentId.value || 'guest'}_${Date.now()}`;
+            agentReply.value = '你好，我是挂号助手。你可以说：我想挂发热门诊，或者向我描述你的不适。';
+            agentMessages.value = [
+                { role: 'assistant', content: agentReply.value }
+            ];
+            agentState.value = 'INIT';
+            agentOptions.value = [];
+            agentInputText.value = '';
+            streamText.value = '';
+            triageResult.value = null;
+            parsedSymptoms.value = {};
+            continuousWords.value = [];
+            assistantPhase.value = 'WELCOME';
+            assistantDisplayText.value = '';
+            agent.clearSentenceBuffer();
+        };
+
         const sendToAgent = async (text) => {
             const content = (text || '').trim();
             if (!content || !currentId.value) return;
@@ -477,11 +495,8 @@ const app = createApp({
 
         const goToSignTriage = () => {
             view.value = 'sign-triage';
-            // 初始化清空上一次的状态
-            parsedSymptoms.value = {};
-            agentState.value = 'INIT';
-            assistantPhase.value = 'WELCOME';
-            assistantDisplayText.value = '';
+            // 每次进入手语挂号都开启一个新的 Agent 会话，避免复用上次未完成的确认状态
+            resetAgentConversation();
             // 自动启动摄像头，等 DOM 渲染完成后再初始化
             if (!cameraStarted.value) {
                 nextTick(() => startCamera());
@@ -495,6 +510,7 @@ const app = createApp({
             }
             agent.stopCamera();
             cameraStarted.value = false;
+            resetAgentConversation();
             view.value = 'reg-home';
         };
 

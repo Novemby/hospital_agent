@@ -17,6 +17,7 @@ from typing import List
 
 router = APIRouter(prefix="/api/agent/register", tags=["agent"])
 logger = logging.getLogger("uvicorn.error")
+print("✅ agent.py loaded with print-based registration traces", flush=True)
 
 DURATION_OPTIONS = ["今天刚开始", "1-3天", "超过1周", "很久了"]
 NEGATION_PREFIXES = ["没有", "并无", "不是", "不", "没", "无"]
@@ -199,24 +200,36 @@ def _normalize_symptom_term(symptom: str) -> str:
     return SYMPTOM_CANONICAL_MAP.get(text, text)
 
 
+def _symptom_variants(symptom: str) -> list:
+    raw = str(symptom or "").strip()
+    normalized = _normalize_symptom_term(raw)
+    variants = []
+    for item in [raw, normalized]:
+        if item and item not in variants:
+            variants.append(item)
+    return variants
+
+
 def _text_mentions_negated(text: str, symptom: str) -> bool:
-    term = _normalize_symptom_term(symptom)
-    if not term:
+    variants = _symptom_variants(symptom)
+    if not variants:
         return False
-    candidates = [
-        f"不{term}",
-        f"不 {term}",
-        f"没{term}",
-        f"没 {term}",
-        f"没有{term}",
-        f"没有 {term}",
-        f"无{term}",
-        f"无 {term}",
-        f"并无{term}",
-        f"并无 {term}",
-        f"不是{term}",
-        f"不是 {term}",
-    ]
+    candidates = []
+    for term in variants:
+        candidates.extend([
+            f"不{term}",
+            f"不 {term}",
+            f"没{term}",
+            f"没 {term}",
+            f"没有{term}",
+            f"没有 {term}",
+            f"无{term}",
+            f"无 {term}",
+            f"并无{term}",
+            f"并无 {term}",
+            f"不是{term}",
+            f"不是 {term}",
+        ])
     return any(item in text for item in candidates)
 
 
@@ -231,7 +244,12 @@ def _sanitize_accompanying_symptoms(raw_text: str, symptoms: list) -> list:
     cleaned = []
     for symptom in symptoms:
         symptom_text = _normalize_symptom_term(symptom)
-        if symptom_text and symptom_text in text and not _text_mentions_negated(text, symptom_text):
+        variants = _symptom_variants(symptom)
+        if (
+            symptom_text
+            and any(term in text for term in variants)
+            and not _text_mentions_negated(text, symptom)
+        ):
             cleaned.append(symptom_text)
     return cleaned
 
@@ -247,7 +265,7 @@ def _sanitize_negative_symptoms(raw_text: str, symptoms: list) -> list:
     cleaned = []
     for symptom in symptoms:
         symptom_text = _normalize_symptom_term(symptom)
-        if symptom_text and _text_mentions_negated(text, symptom_text):
+        if symptom_text and _text_mentions_negated(text, symptom):
             cleaned.append(symptom_text)
     return cleaned
 
@@ -270,13 +288,15 @@ def _extract_rule_based_symptoms(raw_text: str) -> dict:
     negative = []
 
     for symptom in sorted(SYMPTOM_KEYWORDS, key=len, reverse=True):
-        if symptom not in text:
+        variants = _symptom_variants(symptom)
+        if not any(term in text for term in variants):
             continue
+        normalized = _normalize_symptom_term(symptom)
         if _text_mentions_negated(text, symptom):
-            if symptom not in negative:
-                negative.append(symptom)
-        elif symptom not in positive:
-            positive.append(symptom)
+            if normalized not in negative:
+                negative.append(normalized)
+        elif normalized not in positive:
+            positive.append(normalized)
 
     tokens = [
         token.strip()
@@ -348,7 +368,27 @@ def _log_agent_stage(stage: str, session: dict, text: str, decision: Optional[di
             "recommended_department": decision.get("recommended_department"),
             "symptom_struct": decision.get("symptom_struct", {}),
         }
-    logger.info("Registration agent trace | %s", json.dumps(log_payload, ensure_ascii=False))
+    message = f"Registration agent trace | {json.dumps(log_payload, ensure_ascii=False)}"
+    logger.info(message)
+    print(message, flush=True)
+
+
+def _log_rule_snapshot(stage: str, text: str, session: dict) -> None:
+    symptom_struct = session.get("symptom_struct", {}) or {}
+    rule_based = _extract_rule_based_symptoms(text)
+    payload = {
+        "stage": stage,
+        "text": text,
+        "rule_positive": rule_based.get("positive", []),
+        "rule_negative": rule_based.get("negative", []),
+        "primary_symptom": symptom_struct.get("primary_symptom"),
+        "accompanying_symptoms": symptom_struct.get("accompanying_symptoms", []),
+        "negative_symptoms": symptom_struct.get("negative_symptoms", []),
+        "department": (session.get("slots", {}) or {}).get("department"),
+    }
+    message = f"Registration rule trace | {json.dumps(payload, ensure_ascii=False)}"
+    logger.info(message)
+    print(message, flush=True)
 
 
 def _build_semantic_snapshot(text: str, decision: dict) -> dict:
@@ -359,16 +399,8 @@ def _build_semantic_snapshot(text: str, decision: dict) -> dict:
         llm_positive = _sanitize_accompanying_symptoms(text, llm_symptom.get("accompanying_symptoms", []))
         llm_negative = _sanitize_negative_symptoms(text, llm_symptom.get("negative_symptoms", []))
 
-    decision_positive = [
-        _normalize_symptom_term(item)
-        for item in (decision.get("affirmed_symptoms", []) or [])
-        if _normalize_symptom_term(item)
-    ]
-    decision_negative = [
-        _normalize_symptom_term(item)
-        for item in (decision.get("negated_symptoms", []) or [])
-        if _normalize_symptom_term(item)
-    ]
+    decision_positive = _sanitize_accompanying_symptoms(text, decision.get("affirmed_symptoms", []) or [])
+    decision_negative = _sanitize_negative_symptoms(text, decision.get("negated_symptoms", []) or [])
     rule_based = _extract_rule_based_symptoms(text)
 
     primary_candidate = None
@@ -464,6 +496,49 @@ def _apply_semantic_snapshot(session_struct: dict, semantic: dict, raw_text: str
     session_struct["primary_symptom"] = primary_symptom
     session_struct["accompanying_symptoms"] = _merge_preserve_order([], accompanying_symptoms)
     session_struct["negative_symptoms"] = _merge_preserve_order([], negative_symptoms)
+
+
+def _enforce_primary_symptom_from_text(session: dict, raw_text: str) -> None:
+    rule_based = _extract_rule_based_symptoms(raw_text)
+    positive_symptoms = [
+        _normalize_symptom_term(item)
+        for item in (rule_based.get("positive", []) or [])
+        if _normalize_symptom_term(item)
+    ]
+    negative_symptoms = {
+        _normalize_symptom_term(item)
+        for item in (session.get("symptom_struct", {}).get("negative_symptoms", []) or [])
+        if _normalize_symptom_term(item)
+    }
+    positive_symptoms = [item for item in positive_symptoms if item not in negative_symptoms]
+    if not positive_symptoms:
+        return
+
+    struct = session.get("symptom_struct", {})
+    current_primary = _normalize_symptom_term(struct.get("primary_symptom"))
+    if current_primary and current_primary not in negative_symptoms:
+        return
+
+    struct["primary_symptom"] = positive_symptoms[0]
+    existing_acc = [
+        _normalize_symptom_term(item)
+        for item in (struct.get("accompanying_symptoms", []) or [])
+        if _normalize_symptom_term(item)
+    ]
+    merged_acc = _merge_preserve_order(existing_acc, positive_symptoms[1:])
+    struct["accompanying_symptoms"] = [item for item in merged_acc if item != struct["primary_symptom"]]
+
+
+def _clear_stale_department_when_symptom_missing(session: dict, raw_text: str) -> None:
+    struct = session.get("symptom_struct", {}) or {}
+    if struct.get("primary_symptom"):
+        return
+    rule_based = _extract_rule_based_symptoms(raw_text)
+    has_symptom_signal = bool((rule_based.get("positive", []) or []) or (rule_based.get("negative", []) or []))
+    if has_symptom_signal:
+        session["slots"]["department"] = None
+        session["slots"]["schedule_id"] = None
+        session["slots"]["period"] = None
 
 
 def _select_department(session: dict, decision: dict) -> Optional[str]:
@@ -687,6 +762,9 @@ def registration_agent_chat(payload: schemas.RegistrationAgentChatRequest, db: S
 
     semantic = _build_semantic_snapshot(text, decision)
     _apply_semantic_snapshot(session["symptom_struct"], semantic, text)
+    _enforce_primary_symptom_from_text(session, text)
+    _clear_stale_department_when_symptom_missing(session, text)
+    _log_rule_snapshot("post_rule_merge", text, session)
 
     # 确保原话永远在追加
     if text and text not in str(session["symptom_struct"].get("original_text", "")):
