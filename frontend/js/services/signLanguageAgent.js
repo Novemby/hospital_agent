@@ -27,6 +27,10 @@ export class SignLanguageAgent {
             onHeadGesture: () => {},
             // "开始结束"手势切换回调：参数为新状态 true=开始识别 false=停止识别
             onToggleByGesture: () => {},
+            cameraWidth: 640,
+            cameraHeight: 480,
+            drawPose: false,
+            drawHands: true,
             ...options
         };
         this.apiUrl = this.options.apiUrl;
@@ -40,6 +44,8 @@ export class SignLanguageAgent {
         this.camera = null;
         this.holistic = null;
         this.cameraStarted = false;
+        this.lastCanvasWidth = 0;
+        this.lastCanvasHeight = 0;
 
         // 孤立词识别相关
         this.isRecording = false;
@@ -118,11 +124,11 @@ export class SignLanguageAgent {
             locateFile: (file) => `${HOLISTIC_BASE_URL}/${file}`
         });
         this.holistic.setOptions({
-            modelComplexity: 1,
+            modelComplexity: 0,
             smoothLandmarks: true,
             minDetectionConfidence: 0.5,
             minTrackingConfidence: 0.5,
-            refineFaceLandmarks: true
+            refineFaceLandmarks: false
         });
         this.holistic.onResults(this.onHolisticResults);
     }
@@ -216,21 +222,27 @@ export class SignLanguageAgent {
 
     onHolisticResults(results) {
         if (!this.canvas) return;
-        this.canvas.width = this.webcam.videoWidth;
-        this.canvas.height = this.webcam.videoHeight;
+        const nextWidth = this.webcam.videoWidth || this.options.cameraWidth;
+        const nextHeight = this.webcam.videoHeight || this.options.cameraHeight;
+        if (nextWidth !== this.lastCanvasWidth || nextHeight !== this.lastCanvasHeight) {
+            this.canvas.width = nextWidth;
+            this.canvas.height = nextHeight;
+            this.lastCanvasWidth = nextWidth;
+            this.lastCanvasHeight = nextHeight;
+        }
         this.ctx.save();
         this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
         this.ctx.drawImage(results.image, 0, 0);
 
         // 绘制关节点
-        if (results.poseLandmarks) {
+        if (this.options.drawPose && results.poseLandmarks) {
             drawConnectors(this.ctx, results.poseLandmarks, this.POSE_CONNECTIONS, { color: '#00FF8866', lineWidth: 2 });
         }
-        if (results.leftHandLandmarks) {
+        if (this.options.drawHands && results.leftHandLandmarks) {
             drawConnectors(this.ctx, results.leftHandLandmarks, this.HAND_CONNECTIONS, { color: '#FF6B6B', lineWidth: 3 });
             drawLandmarks(this.ctx, results.leftHandLandmarks, { color: '#FF6B6B', radius: 3 });
         }
-        if (results.rightHandLandmarks) {
+        if (this.options.drawHands && results.rightHandLandmarks) {
             drawConnectors(this.ctx, results.rightHandLandmarks, this.HAND_CONNECTIONS, { color: '#4ECDC4', lineWidth: 3 });
             drawLandmarks(this.ctx, results.rightHandLandmarks, { color: '#4ECDC4', radius: 3 });
         }
@@ -436,12 +448,12 @@ export class SignLanguageAgent {
         this.webcam = document.getElementById(videoElementId);
         this.canvas = document.getElementById(canvasElementId);
         if (!this.webcam || !this.canvas) throw new Error('Video or canvas element not found');
-        this.ctx = this.canvas.getContext('2d');
+        this.ctx = this.canvas.getContext('2d', { alpha: true, desynchronized: true });
         this.initHolistic();
         this.camera = new Camera(this.webcam, {
             onFrame: async () => { await this.holistic.send({ image: this.webcam }); },
-            width: 640,
-            height: 480
+            width: this.options.cameraWidth,
+            height: this.options.cameraHeight
         });
         await this.camera.start();
         this.cameraStarted = true;
@@ -458,7 +470,7 @@ export class SignLanguageAgent {
         this.options.onStatusChange('recordingStart');
     }
 
-    // 向后端发送一段帧序列，返回 { word, confidence } 或 null
+    // 向后端发送一段帧序列，返回 { word, confidence, topPredictions } 或 null
     async _sendFrames(frames) {
         try {
             const response = await fetch(`${this.recognitionApiUrl}/recognize`, {
@@ -468,7 +480,11 @@ export class SignLanguageAgent {
             });
             const result = await response.json();
             if (response.ok && result.word) {
-                return { word: result.word, confidence: result.confidence || 0.8 };
+                return {
+                    word: result.word,
+                    confidence: result.confidence || 0.8,
+                    topPredictions: Array.isArray(result.top_predictions) ? result.top_predictions : []
+                };
             }
             return null;
         } catch (e) {
@@ -511,19 +527,20 @@ export class SignLanguageAgent {
 
             // 多窗口投票：选出出现次数最多的词
             const counts = {};
-            let bestWord = predictions[0].word, bestConf = predictions[0].confidence, maxCount = 0;
+            let bestWord = predictions[0].word, bestConf = predictions[0].confidence, bestTopPredictions = predictions[0].topPredictions || [], maxCount = 0;
             for (const p of predictions) {
                 counts[p.word] = (counts[p.word] || 0) + 1;
                 if (counts[p.word] > maxCount) {
                     maxCount = counts[p.word];
                     bestWord = p.word;
                     bestConf = p.confidence;
+                    bestTopPredictions = p.topPredictions || [];
                 }
             }
 
-            this.displayResult(bestWord, bestConf);
-            this.options.onResult({ prediction: bestWord, confidence: bestConf, topPredictions: [] });
-            this.options.onStatusChange('resultReady', { prediction: bestWord, confidence: bestConf, topPredictions: [] });
+            this.displayResult(bestWord, bestConf, bestTopPredictions);
+            this.options.onResult({ prediction: bestWord, confidence: bestConf, topPredictions: bestTopPredictions });
+            this.options.onStatusChange('resultReady', { prediction: bestWord, confidence: bestConf, topPredictions: bestTopPredictions });
             if (this.continuousMode) {
                 this.options.onStatusChange('continuousReady');
             }
@@ -533,7 +550,7 @@ export class SignLanguageAgent {
         }
     }
 
-    displayResult(prediction, confidence) {
+    displayResult(prediction, confidence, topPredictions = []) {
         if (prediction === '无意义词') return;
         // 连续识别模式：跳过稳定性投票，直接输出，仅做短时去重
         if (this.continuousMode) {
@@ -556,7 +573,7 @@ export class SignLanguageAgent {
                     this.sentenceTimer = null;
                 }, this.SENTENCE_TIMEOUT);
             }
-            this.options.onResult({ prediction, confidence, topPredictions: [] });
+            this.options.onResult({ prediction, confidence, topPredictions });
             return;
         }
 
@@ -586,9 +603,9 @@ export class SignLanguageAgent {
                     this.sentenceTimer = null;
                 }, this.SENTENCE_TIMEOUT);
             }
-            this.options.onResult({ prediction: finalPrediction, confidence, topPredictions: [] });
+            this.options.onResult({ prediction: finalPrediction, confidence, topPredictions });
         } else {
-            this.options.onResult({ prediction: `${prediction}?`, confidence, topPredictions: [] });
+            this.options.onResult({ prediction: `${prediction}?`, confidence, topPredictions });
         }
     }
 

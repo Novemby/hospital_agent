@@ -1,7 +1,7 @@
 import json
 import math
 from dataclasses import dataclass
-from typing import Dict, List, Sequence, Tuple
+from typing import Any, Dict, List, Sequence, Tuple
 
 import numpy as np
 import torch
@@ -893,9 +893,9 @@ class SignLanguageModel:
         self.model.teacher_loaded = True
         self.model.eval()
 
-    def recognize(self, frames: List[List[float]]) -> Tuple[str, float]:
+    def predict_with_details(self, frames: List[List[float]], topk: int = 5) -> Tuple[str, float, List[Dict[str, Any]]]:
         if not frames:
-            return "", 0.0
+            return "", 0.0, []
 
         raw_features = convert_frontend_to_model_format(frames)
         joint_feat, bone_feat, velocity_feat, relation_feat, graph_nodes = build_model_features(
@@ -922,5 +922,23 @@ class SignLanguageModel:
             probs = F.softmax(logits, dim=1)
             pred_idx = torch.argmax(probs, dim=1).item()
             confidence = probs[0, pred_idx].item()
+            topk_count = min(topk, probs.shape[1])
+            top_values, top_indices = torch.topk(probs, k=topk_count, dim=1)
 
-        return self.idx_to_word.get(pred_idx, "未识别"), confidence
+        top_predictions = [
+            {
+                "label": self.idx_to_word.get(class_idx.item(), "未识别"),
+                "confidence": score.item(),
+                "rank": rank,
+            }
+            for rank, (score, class_idx) in enumerate(
+                zip(top_values[0], top_indices[0]),
+                start=1,
+            )
+        ]
+
+        return self.idx_to_word.get(pred_idx, "未识别"), confidence, top_predictions
+
+    def recognize(self, frames: List[List[float]]) -> Tuple[str, float]:
+        word, confidence, _ = self.predict_with_details(frames)
+        return word, confidence

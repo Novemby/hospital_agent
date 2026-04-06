@@ -1,4 +1,5 @@
 import json
+import logging
 from datetime import datetime
 from typing import Optional
 
@@ -15,14 +16,74 @@ from pydantic import BaseModel
 from typing import List
 
 router = APIRouter(prefix="/api/agent/register", tags=["agent"])
+logger = logging.getLogger("uvicorn.error")
 
 DURATION_OPTIONS = ["今天刚开始", "1-3天", "超过1周", "很久了"]
+NEGATION_PREFIXES = ["没有", "并无", "不是", "不", "没", "无"]
+SYMPTOM_KEYWORDS = [
+    "头晕", "头痛", "头疼", "偏头", "发烧", "发热", "咳嗽", "感冒", "流涕", "乏力",
+    "恶心", "呕吐", "腹泻", "胸闷", "胸痛", "心悸", "心跳", "酸痛", "疼痛", "不适",
+    "痒", "红斑", "过敏", "鼻塞", "打喷嚏", "喉咙痛", "咽痛", "嗓子痛", "气短", "胸口闷",
+    "呼吸困难", "发冷", "怕冷", "咳痰", "咽干", "流鼻涕", "肚子痛", "腹痛", "胃痛",
+    "拉肚子", "反酸", "烧心",
+]
+CORRECTION_MARKERS = ["前面说错了", "刚刚说错了", "不是", "而是", "改成", "更正", "纠正一下"]
+SYMPTOM_CANONICAL_MAP = {
+    "肚子痛": "腹痛",
+    "胃痛": "腹痛",
+    "拉肚子": "腹泻",
+    "流鼻涕": "流涕",
+    "喉咙痛": "咽痛",
+    "嗓子痛": "咽痛",
+    "胸口闷": "胸闷",
+    "发烧": "发热",
+    "头疼": "头痛",
+}
+SYMPTOM_FOLLOWUP_RULES = [
+    {
+        "keywords": ["咳嗽", "咳痰", "发烧", "发热", "流涕", "流鼻涕", "鼻塞", "打喷嚏", "咽痛", "喉咙痛", "嗓子痛"],
+        "prefix": "明白，已记录到呼吸道相关不适。",
+        "question": "这些症状大概持续多久了？",
+        "options": ["今天刚开始", "1-3天", "超过1周", "很久了"],
+    },
+    {
+        "keywords": ["腹痛", "肚子痛", "胃痛", "腹泻", "拉肚子", "恶心", "呕吐", "反酸", "烧心"],
+        "prefix": "好的，已记录到消化道相关不适。",
+        "question": "这些情况持续多久了？",
+        "options": ["今天刚开始", "1-3天", "超过1周", "反复发作很久了"],
+    },
+    {
+        "department": "泌尿外科",
+        "keywords": ["尿血", "血尿", "尿痛", "尿频", "尿急", "排尿困难", "腰痛", "肾区痛"],
+        "prefix": "好的，已记录到泌尿系统相关不适。",
+        "question": "这些情况持续多久了？如果方便，也可以后续继续补充是否伴随尿痛、尿频等表现。",
+        "options": ["今天刚开始", "1-3天", "超过1周", "反复发作很久了"],
+    },
+    {
+        "keywords": ["胸闷", "胸痛", "胸口闷", "心悸", "心跳", "气短", "呼吸困难"],
+        "prefix": "好的，已记录到胸部或呼吸相关不适。",
+        "question": "这种情况持续多久了？如果是刚刚突然出现，也可以直接选“今天刚开始”。",
+        "options": ["今天刚开始", "1-3天", "超过1周", "反复发作很久了"],
+    },
+    {
+        "keywords": ["头晕", "头痛", "头疼", "偏头", "乏力", "怕冷", "发冷"],
+        "prefix": "好的，已记录到全身或头部相关不适。",
+        "question": "这种情况持续多久了？",
+        "options": ["今天刚开始", "1-3天", "超过1周", "很久了"],
+    },
+    {
+        "keywords": ["疼痛", "酸痛"],
+        "prefix": "好的，已记录到疼痛相关不适。",
+        "question": "疼痛大概持续多久了？",
+        "options": ["今天刚开始", "1-3天", "超过1周", "很久了"],
+    },
+]
 
 
 # ===========================================================================
 # 🌟 内部辅助函数：获取患者长期的 JSON 结构化画像 (新增)
 # ===========================================================================
-def _get_patient_json_profile(db: Session, patient_id: int) -> str:
+def _get_patient_json_profile(db: Session, patient_id: int, mode: str = "triage") -> str:
     # 先拿死数据（性别、过敏等硬性要求）
     patient = crud.get_patient_by_id(db, patient_id)
     base_info = f"患者基础信息 - 姓名:{patient.name}, 过敏史:{patient.allergy_history}" if patient else ""
@@ -33,8 +94,91 @@ def _get_patient_json_profile(db: Session, patient_id: int) -> str:
         {"pid": patient_id}
     ).fetchone()
 
-    json_memory = mem_record[0] if mem_record and mem_record[0].startswith("{") else "{}"
-    return f"{base_info}\n【动态长期记忆】:\n{json_memory}"
+    raw_memory = mem_record[0] if mem_record and str(mem_record[0]).startswith("{") else "{}"
+    normalized_memory = unified_medical_agent.normalize_memory_profile(raw_memory)
+    if patient and patient.allergy_history and patient.allergy_history.strip() and patient.allergy_history.strip() != "无":
+        allergy_items = []
+        for item in normalized_memory.get("facts", {}).get("allergies", []) or []:
+            if isinstance(item, dict):
+                value = str(item.get("value") or "").strip()
+                if value:
+                    allergy_items.append(item)
+            else:
+                value = str(item or "").strip()
+                if value:
+                    allergy_items.append({
+                        "value": value,
+                        "source": "legacy_migrated",
+                        "confirmed": True,
+                        "confidence": 0.9,
+                    })
+
+        normalized_memory["facts"]["allergies"] = allergy_items
+        allergy_value = patient.allergy_history.strip()
+        existing_values = {
+            str(item.get("value") or "").strip()
+            for item in normalized_memory["facts"]["allergies"]
+            if isinstance(item, dict)
+        }
+        if allergy_value not in existing_values:
+            normalized_memory["facts"]["allergies"].append({
+                "value": allergy_value,
+                "source": "system_imported",
+                "confirmed": True,
+                "confidence": 0.98,
+            })
+
+    if mode == "consultation":
+        memory_text = unified_medical_agent.build_consultation_memory_profile(
+            json.dumps(normalized_memory, ensure_ascii=False)
+        )
+    else:
+        memory_text = unified_medical_agent.build_triage_memory_profile(
+            json.dumps(normalized_memory, ensure_ascii=False)
+        )
+    return f"{base_info}\n【动态长期记忆】:\n{memory_text}"
+
+
+@router.get("/memory/profile/{patient_id}")
+def get_patient_memory_profile(patient_id: int, mode: str = "consultation", db: Session = Depends(get_db)):
+    patient = crud.get_patient_by_id(db, patient_id)
+    if not patient:
+        raise HTTPException(status_code=404, detail="患者不存在")
+
+    mem_record = db.execute(
+        text("SELECT ai_summary FROM ai_agent_memory WHERE patient_id = :pid ORDER BY created_at DESC LIMIT 1"),
+        {"pid": patient_id}
+    ).fetchone()
+    raw_memory = mem_record[0] if mem_record and str(mem_record[0]).startswith("{") else "{}"
+    normalized_memory = unified_medical_agent.normalize_memory_profile(raw_memory)
+
+    if patient.allergy_history and patient.allergy_history.strip() and patient.allergy_history.strip() != "无":
+        allergy_value = patient.allergy_history.strip()
+        existing_values = {
+            str(item.get("value") or "").strip()
+            for item in normalized_memory.get("facts", {}).get("allergies", []) or []
+            if isinstance(item, dict)
+        }
+        if allergy_value not in existing_values:
+            normalized_memory.setdefault("facts", {}).setdefault("allergies", []).append({
+                "value": allergy_value,
+                "source": "system_imported",
+                "confirmed": True,
+                "confidence": 0.98,
+            })
+
+    selected_mode = "consultation" if mode == "consultation" else "triage"
+    profile_text = (
+        unified_medical_agent.build_consultation_memory_profile(json.dumps(normalized_memory, ensure_ascii=False))
+        if selected_mode == "consultation"
+        else unified_medical_agent.build_triage_memory_profile(json.dumps(normalized_memory, ensure_ascii=False))
+    )
+    return {
+        "patient_id": patient_id,
+        "mode": selected_mode,
+        "normalized_memory": normalized_memory,
+        "prompt_profile": json.loads(profile_text),
+    }
 
 
 # 保留极简的兜底时段识别
@@ -47,6 +191,35 @@ def _detect_period(text: str) -> Optional[str]:
     return None
 
 
+def _normalize_symptom_term(symptom: str) -> str:
+    text = str(symptom or "").strip()
+    for prefix in NEGATION_PREFIXES:
+        if text.startswith(prefix) and len(text) > len(prefix):
+            return text[len(prefix):].strip()
+    return SYMPTOM_CANONICAL_MAP.get(text, text)
+
+
+def _text_mentions_negated(text: str, symptom: str) -> bool:
+    term = _normalize_symptom_term(symptom)
+    if not term:
+        return False
+    candidates = [
+        f"不{term}",
+        f"不 {term}",
+        f"没{term}",
+        f"没 {term}",
+        f"没有{term}",
+        f"没有 {term}",
+        f"无{term}",
+        f"无 {term}",
+        f"并无{term}",
+        f"并无 {term}",
+        f"不是{term}",
+        f"不是 {term}",
+    ]
+    return any(item in text for item in candidates)
+
+
 def _sanitize_accompanying_symptoms(raw_text: str, symptoms: list) -> list:
     if not symptoms:
         return []
@@ -57,10 +230,323 @@ def _sanitize_accompanying_symptoms(raw_text: str, symptoms: list) -> list:
 
     cleaned = []
     for symptom in symptoms:
-        symptom_text = str(symptom).strip()
-        if symptom_text and symptom_text in text:
+        symptom_text = _normalize_symptom_term(symptom)
+        if symptom_text and symptom_text in text and not _text_mentions_negated(text, symptom_text):
             cleaned.append(symptom_text)
     return cleaned
+
+
+def _sanitize_negative_symptoms(raw_text: str, symptoms: list) -> list:
+    if not symptoms:
+        return []
+
+    text = (raw_text or "").strip()
+    if not text:
+        return []
+
+    cleaned = []
+    for symptom in symptoms:
+        symptom_text = _normalize_symptom_term(symptom)
+        if symptom_text and _text_mentions_negated(text, symptom_text):
+            cleaned.append(symptom_text)
+    return cleaned
+
+
+def _merge_preserve_order(existing: list, incoming: list) -> list:
+    merged = []
+    for item in list(existing or []) + list(incoming or []):
+        value = str(item or "").strip()
+        if value and value not in merged:
+            merged.append(value)
+    return merged
+
+
+def _extract_rule_based_symptoms(raw_text: str) -> dict:
+    text = str(raw_text or "").strip()
+    if not text:
+        return {"positive": [], "negative": []}
+
+    positive = []
+    negative = []
+
+    for symptom in sorted(SYMPTOM_KEYWORDS, key=len, reverse=True):
+        if symptom not in text:
+            continue
+        if _text_mentions_negated(text, symptom):
+            if symptom not in negative:
+                negative.append(symptom)
+        elif symptom not in positive:
+            positive.append(symptom)
+
+    tokens = [
+        token.strip()
+        for token in text.replace("，", " ").replace("。", " ").replace(",", " ").split()
+        if token.strip()
+    ]
+    pending_negation = False
+    for token in tokens:
+        if token in NEGATION_PREFIXES:
+            pending_negation = True
+            continue
+        normalized = _normalize_symptom_term(token)
+        if normalized in SYMPTOM_KEYWORDS:
+            if pending_negation:
+                if normalized not in negative:
+                    negative.append(normalized)
+                if normalized in positive:
+                    positive.remove(normalized)
+            elif normalized not in negative and normalized not in positive:
+                positive.append(normalized)
+        pending_negation = False
+
+    positive = [item for item in positive if item not in negative]
+    return {"positive": positive, "negative": negative}
+
+
+def _has_correction_intent(text: str) -> bool:
+    raw = str(text or "").strip()
+    return any(marker in raw for marker in CORRECTION_MARKERS)
+
+
+def _apply_correction_to_struct(struct: dict, raw_text: str, rule_based: dict) -> None:
+    if not _has_correction_intent(raw_text):
+        return
+
+    positive = rule_based.get("positive", []) or []
+    negative = rule_based.get("negative", []) or []
+
+    if positive:
+        struct["primary_symptom"] = positive[0]
+        struct["accompanying_symptoms"] = positive[1:]
+    else:
+        struct["primary_symptom"] = None
+        struct["accompanying_symptoms"] = []
+
+    if negative:
+        struct["negative_symptoms"] = _merge_preserve_order([], negative)
+
+
+def _log_agent_stage(stage: str, session: dict, text: str, decision: Optional[dict] = None) -> None:
+    symptom_struct = session.get("symptom_struct", {}) or {}
+    log_payload = {
+        "stage": stage,
+        "text": text,
+        "state": session.get("state"),
+        "department": (session.get("slots", {}) or {}).get("department"),
+        "date": (session.get("slots", {}) or {}).get("date"),
+        "period": (session.get("slots", {}) or {}).get("period"),
+        "primary_symptom": symptom_struct.get("primary_symptom"),
+        "accompanying_symptoms": symptom_struct.get("accompanying_symptoms", []),
+        "negative_symptoms": symptom_struct.get("negative_symptoms", []),
+        "body_part": symptom_struct.get("body_part"),
+        "duration": symptom_struct.get("duration"),
+    }
+    if decision is not None:
+        log_payload["llm_decision"] = {
+            "intent": decision.get("intent"),
+            "department": decision.get("department"),
+            "recommended_department": decision.get("recommended_department"),
+            "symptom_struct": decision.get("symptom_struct", {}),
+        }
+    logger.info("Registration agent trace | %s", json.dumps(log_payload, ensure_ascii=False))
+
+
+def _build_semantic_snapshot(text: str, decision: dict) -> dict:
+    llm_symptom = decision.get("symptom_struct", {}) if isinstance(decision, dict) else {}
+    llm_positive = []
+    llm_negative = []
+    if isinstance(llm_symptom, dict):
+        llm_positive = _sanitize_accompanying_symptoms(text, llm_symptom.get("accompanying_symptoms", []))
+        llm_negative = _sanitize_negative_symptoms(text, llm_symptom.get("negative_symptoms", []))
+
+    decision_positive = [
+        _normalize_symptom_term(item)
+        for item in (decision.get("affirmed_symptoms", []) or [])
+        if _normalize_symptom_term(item)
+    ]
+    decision_negative = [
+        _normalize_symptom_term(item)
+        for item in (decision.get("negated_symptoms", []) or [])
+        if _normalize_symptom_term(item)
+    ]
+    rule_based = _extract_rule_based_symptoms(text)
+
+    primary_candidate = None
+    if isinstance(llm_symptom, dict):
+        primary_candidate = _normalize_symptom_term(llm_symptom.get("primary_symptom"))
+
+    positive = _merge_preserve_order(llm_positive, decision_positive)
+    positive = _merge_preserve_order(positive, rule_based["positive"])
+    negative = _merge_preserve_order(llm_negative, decision_negative)
+    negative = _merge_preserve_order(negative, rule_based["negative"])
+    positive = [item for item in positive if item not in negative]
+
+    if primary_candidate and primary_candidate in negative:
+        primary_candidate = None
+    if primary_candidate and primary_candidate in positive:
+        positive = [item for item in positive if item != primary_candidate]
+
+    if not primary_candidate and positive:
+        primary_candidate = positive[0]
+        positive = positive[1:]
+
+    return {
+        "primary_symptom": primary_candidate,
+        "accompanying_symptoms": positive,
+        "negative_symptoms": negative,
+        "body_part": (llm_symptom.get("body_part") if isinstance(llm_symptom, dict) else None),
+        "duration": (llm_symptom.get("duration") if isinstance(llm_symptom, dict) else None),
+        "severity": (llm_symptom.get("severity") if isinstance(llm_symptom, dict) else None),
+        "correction_intent": bool(decision.get("correction_intent")) or _has_correction_intent(text),
+        "department_candidates": _merge_preserve_order(
+            decision.get("department_candidates", []) or [],
+            [decision.get("recommended_department"), decision.get("department")],
+        ),
+    }
+
+
+def _apply_semantic_snapshot(session_struct: dict, semantic: dict, raw_text: str) -> None:
+    if semantic.get("correction_intent"):
+        session_struct["primary_symptom"] = semantic.get("primary_symptom")
+        session_struct["accompanying_symptoms"] = semantic.get("accompanying_symptoms", []) or []
+        session_struct["negative_symptoms"] = semantic.get("negative_symptoms", []) or []
+        if semantic.get("body_part") is not None:
+            session_struct["body_part"] = semantic.get("body_part")
+        if semantic.get("duration") is not None:
+            session_struct["duration"] = semantic.get("duration")
+        if semantic.get("severity") is not None:
+            session_struct["severity"] = semantic.get("severity")
+    else:
+        if semantic.get("primary_symptom"):
+            session_struct["primary_symptom"] = semantic.get("primary_symptom")
+        session_struct["accompanying_symptoms"] = _merge_preserve_order(
+            session_struct.get("accompanying_symptoms", []),
+            semantic.get("accompanying_symptoms", []),
+        )
+        session_struct["negative_symptoms"] = _merge_preserve_order(
+            session_struct.get("negative_symptoms", []),
+            semantic.get("negative_symptoms", []),
+        )
+        if semantic.get("body_part"):
+            session_struct["body_part"] = semantic.get("body_part")
+        if semantic.get("duration"):
+            session_struct["duration"] = semantic.get("duration")
+        if semantic.get("severity"):
+            session_struct["severity"] = semantic.get("severity")
+
+    primary_symptom = _normalize_symptom_term(session_struct.get("primary_symptom"))
+    negative_symptoms = [
+        _normalize_symptom_term(item)
+        for item in (session_struct.get("negative_symptoms", []) or [])
+        if _normalize_symptom_term(item)
+    ]
+    accompanying_symptoms = [
+        _normalize_symptom_term(item)
+        for item in (session_struct.get("accompanying_symptoms", []) or [])
+        if _normalize_symptom_term(item)
+    ]
+    accompanying_symptoms = [item for item in accompanying_symptoms if item not in negative_symptoms]
+
+    if primary_symptom and (
+        primary_symptom in negative_symptoms or _text_mentions_negated(raw_text, primary_symptom)
+    ):
+        negative_symptoms = _merge_preserve_order(negative_symptoms, [primary_symptom])
+        primary_symptom = None
+
+    if primary_symptom:
+        accompanying_symptoms = [item for item in accompanying_symptoms if item != primary_symptom]
+    elif accompanying_symptoms:
+        primary_symptom = accompanying_symptoms[0]
+        accompanying_symptoms = accompanying_symptoms[1:]
+    elif session_struct.get("body_part"):
+        primary_symptom = "不适"
+
+    session_struct["primary_symptom"] = primary_symptom
+    session_struct["accompanying_symptoms"] = _merge_preserve_order([], accompanying_symptoms)
+    session_struct["negative_symptoms"] = _merge_preserve_order([], negative_symptoms)
+
+
+def _select_department(session: dict, decision: dict) -> Optional[str]:
+    current_department = session["slots"].get("department")
+    if _is_change_department_intent(session.get("_last_text_for_department", ""), decision.get("intent")) and decision.get("department"):
+        return decision["department"]
+    if decision.get("department") and not current_department:
+        return decision["department"]
+    if decision.get("recommended_department"):
+        return decision.get("recommended_department")
+    for candidate in decision.get("department_candidates", []) or []:
+        if candidate:
+            return candidate
+
+    struct = session.get("symptom_struct", {}) or {}
+    symptom_text = " ".join(
+        [
+            struct.get('body_part', '') or '',
+            struct.get('primary_symptom', '') or '',
+            " ".join(struct.get('accompanying_symptoms', []) or []),
+        ]
+    ).strip()
+    return _infer_department_from_symptom(symptom_text)
+
+
+def _build_duration_followup(symptom_struct: dict, department: Optional[str] = None) -> dict:
+    bp = symptom_struct.get("body_part") or ""
+    ps = symptom_struct.get("primary_symptom") or "不适"
+    symptom_name = ps if bp and bp in ps else f"{bp}{ps}"
+
+    if department == "泌尿外科":
+        if symptom_name == "腹部腹痛":
+            symptom_name = "腹痛"
+        if symptom_name == "不适":
+            symptom_name = "泌尿系统不适"
+    elif department == "消化内科":
+        if symptom_name == "腹部腹痛":
+            symptom_name = "腹痛"
+    elif department == "心内科":
+        if symptom_name == "胸部胸痛":
+            symptom_name = "胸痛"
+        elif symptom_name == "胸部胸闷":
+            symptom_name = "胸闷"
+    elif department == "神经内科":
+        if symptom_name == "头部头痛":
+            symptom_name = "头痛"
+        elif symptom_name == "头部头晕":
+            symptom_name = "头晕"
+
+    acc_list = symptom_struct.get("accompanying_symptoms") or []
+    neg_list = symptom_struct.get("negative_symptoms") or []
+    details = [f"有「{symptom_name}」"]
+    if acc_list:
+        details.append(f"伴有「{'、'.join(acc_list)}」")
+    if neg_list:
+        details.append(f"但没有「{'、'.join(neg_list)}」")
+
+    combined_text = " ".join([symptom_name] + acc_list)
+    selected_rule = None
+    if department:
+        for rule in SYMPTOM_FOLLOWUP_RULES:
+            if rule.get("department") == department:
+                selected_rule = rule
+                break
+    for rule in SYMPTOM_FOLLOWUP_RULES:
+        if selected_rule is not None:
+            break
+        if any(keyword in combined_text for keyword in rule["keywords"]):
+            selected_rule = rule
+            break
+
+    if selected_rule is None:
+        selected_rule = {
+            "prefix": "明白，已了解您的情况。",
+            "question": "为了帮医生准确评估病情，请问持续多久了？",
+            "options": DURATION_OPTIONS,
+        }
+
+    reply = f"{selected_rule['prefix']}您提到{ '，'.join(details) }。{selected_rule['question']}"
+    return {
+        "reply": reply,
+        "options": selected_rule["options"],
+    }
 
 
 def _next_missing_field(symptom: dict) -> Optional[str]:
@@ -104,10 +590,18 @@ def _infer_department_from_symptom(symptom_text: str) -> Optional[str]:
         (["耳", "鼻", "喉", "咽", "听力"], "耳鼻喉科"),
         (["发热", "发烧", "咳嗽", "感冒", "流涕", "乏力", "不适"], "内科"),
     ]
+    best_department = None
+    best_score = 0
     for keywords, dept in mapping:
-        if any(k in symptom_text for k in keywords):
-            return dept
-    return None
+        matched_keywords = [keyword for keyword in keywords if keyword in symptom_text]
+        if not matched_keywords:
+            continue
+        # 更长、更具体的词优先；多个命中词也会抬高置信度。
+        score = sum(len(keyword) for keyword in matched_keywords)
+        if score > best_score:
+            best_score = score
+            best_department = dept
+    return best_department
 
 
 def _should_proceed_to_slots(session: dict, text: str) -> bool:
@@ -148,6 +642,7 @@ def registration_agent_chat(payload: schemas.RegistrationAgentChatRequest, db: S
         "duration": None,
         "severity": None,
         "accompanying_symptoms": [],
+        "negative_symptoms": [],
         "original_text": "",
     })
     session.setdefault("policy", {
@@ -155,21 +650,24 @@ def registration_agent_chat(payload: schemas.RegistrationAgentChatRequest, db: S
     })
 
     text = payload.message.strip()
+    session["_last_text_for_department"] = text
 
     if "重新描述" in text:
         session["state"] = "COLLECT_INFO"
         session["slots"]["department"] = None
         session["slots"]["schedule_id"] = None
         session["slots"]["period"] = None
-        session["symptom_struct"] = {k: (None if k != "accompanying_symptoms" else []) for k in
-                                     session["symptom_struct"]}
+        session["symptom_struct"] = {
+            k: ([] if k in ["accompanying_symptoms", "negative_symptoms"] else None)
+            for k in session["symptom_struct"]
+        }
         session["symptom_struct"]["original_text"] = ""
         session["policy"]["soft_ask_count"] = 0
         return helpers.make_agent_response("好的，请重新描述你的症状，我会重新为你推荐科室。", session, ["symptom"], [],
                                            "collect_symptom")
 
     # 🌟 核心升级：从数据库中提取该患者的长期的 JSON 画像
-    patient_profile = _get_patient_json_profile(db, payload.patient_id)
+    patient_profile = _get_patient_json_profile(db, payload.patient_id, mode="triage")
 
     # 1. 🌟 调用同一个 Agent，执行【分诊阶段】任务，并传入长期记忆(patient_profile)
     decision = unified_medical_agent.triage_stage_understand(
@@ -178,17 +676,7 @@ def registration_agent_chat(payload: schemas.RegistrationAgentChatRequest, db: S
         session.get("symptom_struct", {}),
         patient_profile=patient_profile
     )
-
-    # 2. 动态更新科室
-    current_department = session["slots"].get("department")
-    change_department = _is_change_department_intent(text, decision.get("intent"))
-
-    if change_department and decision.get("department"):
-        session["slots"]["department"] = decision["department"]
-    elif decision.get("department") and not current_department:
-        session["slots"]["department"] = decision["department"]
-    elif decision.get("recommended_department"):
-        session["slots"]["department"] = decision.get("recommended_department")
+    _log_agent_stage("llm_decision", session, text, decision)
 
     if decision.get("date"):
         session["slots"]["date"] = decision["date"]
@@ -197,43 +685,19 @@ def registration_agent_chat(payload: schemas.RegistrationAgentChatRequest, db: S
     if period:
         session["slots"]["period"] = period
 
-    # ==============================================================
-    # 🌟 核心修复 2：智能防覆盖机制，杜绝大模型返回的空值抹掉现有记录
-    # ==============================================================
-    llm_symptom = decision.get("symptom_struct", {})
-    if llm_symptom and isinstance(llm_symptom, dict):
-        if isinstance(llm_symptom.get("accompanying_symptoms"), list):
-            llm_symptom["accompanying_symptoms"] = _sanitize_accompanying_symptoms(
-                text,
-                llm_symptom.get("accompanying_symptoms", [])
-            )
-        for k, v in llm_symptom.items():
-            if v:  # 只有 LLM 真的提取到了内容才更新，拒绝 null 覆盖
-                if k == "accompanying_symptoms" and isinstance(v, list):
-                    existing = session["symptom_struct"].get(k, [])
-                    session["symptom_struct"][k] = list(set(existing + v))
-                else:
-                    session["symptom_struct"][k] = v
+    semantic = _build_semantic_snapshot(text, decision)
+    _apply_semantic_snapshot(session["symptom_struct"], semantic, text)
 
     # 确保原话永远在追加
     if text and text not in str(session["symptom_struct"].get("original_text", "")):
         session["symptom_struct"]["original_text"] = (
                 str(session["symptom_struct"].get("original_text", "")) + " " + text).strip()
 
-    # ==============================================================
-    # 🌟 核心修复 3：强行提权机制！打断一切可能的死循环！
-    # ==============================================================
-    struct = session["symptom_struct"]
-    if not struct.get("primary_symptom"):
-        # 如果大模型死板地把“头晕”放在了伴随症状里，强行把它提出来当作核心症状！
-        if struct.get("accompanying_symptoms"):
-            struct["primary_symptom"] = struct["accompanying_symptoms"].pop(0)
-        # 如果大模型只给了一个部位（比如只提了头部），强行组装一个保底词
-        elif struct.get("body_part"):
-            struct["primary_symptom"] = "不适"
+    session["slots"]["department"] = _select_department(session, decision) or session["slots"].get("department")
 
     # 落库前同步状态
     session["slots"]["triage_symptoms"] = json.dumps(session["symptom_struct"], ensure_ascii=False)
+    _log_agent_stage("post_merge", session, text)
 
     lower_text = text.lower()
     is_confirm = bool(decision.get("confirm")) or ("确认" in text or lower_text in ["ok", "yes", "y"])
@@ -256,17 +720,17 @@ def registration_agent_chat(payload: schemas.RegistrationAgentChatRequest, db: S
 
         if missing == "duration":
             session["state"] = "COLLECT_INFO"
-            bp = session['symptom_struct'].get('body_part') or ''
-            ps = session['symptom_struct'].get('primary_symptom') or '不适'
-            symptom_name = ps if bp in ps else f"{bp}{ps}"
-
-            acc_list = session['symptom_struct'].get('accompanying_symptoms') or []
-            acc_str = f"，且伴有「{'、'.join(acc_list)}」" if acc_list else ""
-            prefix = "明白，这确实需要引起重视。" if acc_list else "了解到"
+            followup = _build_duration_followup(
+                session["symptom_struct"],
+                session["slots"].get("department"),
+            )
 
             return helpers.make_agent_response(
-                f"{prefix}您有「{symptom_name}」{acc_str}的情况。为了帮医生准确评估病情，请问持续多久了？",
-                session, ["duration"], DURATION_OPTIONS, "collect_duration"
+                followup["reply"],
+                session,
+                ["duration"],
+                followup["options"],
+                "collect_duration",
             )
 
         if missing == "body_part":
@@ -275,13 +739,7 @@ def registration_agent_chat(payload: schemas.RegistrationAgentChatRequest, db: S
                                                "collect_body_part")
 
     if not session["slots"].get("department"):
-        # 症状信息已完整，尝试从症状自动推断科室
-        struct = session["symptom_struct"]
-        inferred = decision.get("recommended_department") or decision.get("department")
-        if not inferred:
-            symptom_text = f"{struct.get('body_part', '')} {struct.get('primary_symptom', '')} {struct.get('original_text', '')}".strip()
-            inferred = _infer_department_from_symptom(symptom_text)
-
+        inferred = _select_department(session, decision)
         if inferred:
             session["slots"]["department"] = inferred
             allow_query_slots = True  # 重新允许进入号源查询
@@ -358,7 +816,7 @@ class PolishRequest(BaseModel):
 @router.post("/consultation/polish")
 def polish_consultation_words(req: PolishRequest, db: Session = Depends(get_db)):
     # 🌟 获取结构化 JSON 画像
-    patient_profile = _get_patient_json_profile(db, req.patient_id)
+    patient_profile = _get_patient_json_profile(db, req.patient_id, mode="consultation")
 
     # 🌟 传入 Agent，执行翻译润色
     agent_result = unified_medical_agent.consultation_stage_polish(req.words, req.context, patient_profile)
@@ -397,7 +855,11 @@ def consolidate_patient_memory(req: ConsolidateRequest, db: Session = Depends(ge
         text("SELECT ai_summary FROM ai_agent_memory WHERE patient_id = :pid ORDER BY created_at DESC LIMIT 1"),
         {"pid": req.patient_id}
     ).fetchone()
-    old_memory_json = mem_record[0] if mem_record and mem_record[0].startswith("{") else "{}"
+    old_memory_json = mem_record[0] if mem_record and str(mem_record[0]).startswith("{") else "{}"
+    old_memory_json = json.dumps(
+        unified_medical_agent.normalize_memory_profile(old_memory_json),
+        ensure_ascii=False,
+    )
 
     # 2. 呼叫 Agent，融合出全新的 JSON 画像
     new_memory_json = unified_medical_agent.consolidate_memory(req.chat_history, old_memory_json)

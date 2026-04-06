@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 
 
 logger = logging.getLogger(__name__)
+access_logger = logging.getLogger("uvicorn.error")
 router = APIRouter(prefix="/api/sign", tags=["sign_language"])
 
 _BASE = os.path.normpath(
@@ -99,12 +100,28 @@ async def recognize(request: RecognizeRequest):
 
     try:
         model_instance = get_model()
-        word, confidence = model_instance.recognize(raw_frames)
+        word, confidence, top_predictions = model_instance.predict_with_details(raw_frames, topk=5)
+        top5_summary = [
+            {
+                "rank": item["rank"],
+                "label": item["label"],
+                "confidence": round(float(item["confidence"]), 4),
+            }
+            for item in top_predictions
+        ]
+        access_logger.info(
+            "Sign recognition top5 | frame_count=%s | top1=%s(%.4f) | top5=%s",
+            len(raw_frames),
+            word,
+            confidence,
+            top5_summary,
+        )
         return RecognizeResponse(
             success=bool(word),
             word=word,
             prediction=word,
             confidence=confidence,
+            top_predictions=[TopPrediction(**item) for item in top_predictions],
             frame_count=len(raw_frames),
         )
     except ValueError as exc:
