@@ -710,6 +710,13 @@ export class SignLanguageAgent {
             this.camera.stop();
             this.cameraStarted = false;
         }
+        // 重置画布尺寸缓存，确保下次启动时重新计算
+        this.lastCanvasWidth = 0;
+        this.lastCanvasHeight = 0;
+        // 清空画布残留画面
+        if (this.canvas && this.ctx) {
+            this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+        }
     }
 
     getSequence() {

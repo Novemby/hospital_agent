@@ -452,6 +452,12 @@ const app = createApp({
                     // 等待渲染完成后再提示成功
                     setTimeout(() => {
                         alert(data.reply || '挂号成功');
+                        if (continuousActive.value) {
+                            agent.stopContinuous();
+                            continuousActive.value = false;
+                        }
+                        agent.stopCamera();
+                        cameraStarted.value = false;
                         view.value = 'reg-home';
                     }, 500);
                 }
