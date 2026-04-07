@@ -325,41 +325,52 @@ const app = createApp({
             newRx.value = { drug: '', dosage: '', usage: '' };
         };
 
+        const syncSelectedPatientRecord = async ({
+            successMessage = '',
+            fallbackMessage = '✅ 内容已暂存本地 (后端未连接，请检查 FastAPI 服务)',
+            failurePrefix = '⚠️ 本地缓存已更新，但同步数据库失败：'
+        } = {}) => {
+            if (!selectedPatient.value) return false;
+
+            selectedPatient.value.medicalHistory = medicalHistoryDraft.value;
+            selectedPatient.value.diagnosis = diagnosisDraft.value;
+            selectedPatient.value.lastUpdated = new Date().toLocaleTimeString();
+            upsertPatient(selectedPatient.value);
+
+            try {
+                const currentDoctor = getCurrentDoctor();
+                const response = await fetch(`http://localhost:8000/api/patients/${selectedPatient.value.id}/sync_record`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        medical_history: medicalHistoryDraft.value || '',
+                        diagnosis: diagnosisDraft.value || '',
+                        prescriptions: selectedPatient.value.prescriptions || [],
+                        doctor_id: currentDoctor?.id || null,
+                        registration_id: selectedPatient.value.registrationId || null
+                    })
+                });
+                const result = await response.json().catch(() => ({}));
+                if (response.ok && result.success !== false) {
+                    if (successMessage) alert(successMessage);
+                    return true;
+                }
+
+                const detail = result.detail || result.message || `HTTP ${response.status}`;
+                alert(`${failurePrefix}${detail}`);
+            } catch (e) {
+                console.warn('同步数据库网络异常', e);
+                if (fallbackMessage) alert(fallbackMessage);
+            }
+
+            return false;
+        };
+
         // 🌟 核心升级：点击保存时，既更新本地缓存（0.01秒UI同步），也发送到后端真实落库
         const saveMedicalHistory = async () => {
-            if (selectedPatient.value) {
-                selectedPatient.value.medicalHistory = medicalHistoryDraft.value;
-                selectedPatient.value.diagnosis = diagnosisDraft.value;
-                // 1. 乐观更新：先保存进本地缓存，让同电脑的患者大厅瞬间同步看到
-                selectedPatient.value.lastUpdated = new Date().toLocaleTimeString();
-                upsertPatient(selectedPatient.value);
-
-                // 2. 真实落盘：发给后端写进 MySQL
-                try {
-                    const currentDoctor = getCurrentDoctor();
-                    const response = await fetch(`http://localhost:8000/api/patients/${selectedPatient.value.id}/sync_record`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            medical_history: medicalHistoryDraft.value || '',
-                            diagnosis: diagnosisDraft.value || '',
-                            prescriptions: selectedPatient.value.prescriptions || [],
-                            doctor_id: currentDoctor?.id || null,
-                            registration_id: selectedPatient.value.registrationId || null
-                        })
-                    });
-                    const result = await response.json().catch(() => ({}));
-                    if (response.ok && result.success !== false) {
-                        alert('✅ 病历已保存，并成功落盘同步至数据库！');
-                    } else {
-                        const detail = result.detail || result.message || `HTTP ${response.status}`;
-                        alert(`⚠️ 本地缓存已更新，但同步数据库失败：${detail}`);
-                    }
-                } catch(e) {
-                    console.warn("同步数据库网络异常", e);
-                    alert('✅ 病历已暂存本地 (后端未连接，请检查 FastAPI 服务)');
-                }
-            }
+            await syncSelectedPatientRecord({
+                successMessage: '✅ 病历已保存，并成功落盘同步至数据库！'
+            });
         };
 
         const applyAiSummary = () => {
@@ -433,21 +444,29 @@ const app = createApp({
             }
         };
 
-        const addPrescription = () => {
+        const addPrescription = async () => {
             if (!newRx.value.drug || !newRx.value.dosage || !newRx.value.usage) {
                 alert('请完整填写药品信息');
                 return;
             }
             if (!selectedPatient.value.prescriptions) selectedPatient.value.prescriptions = [];
             selectedPatient.value.prescriptions.push({ ...newRx.value });
-            upsertPatient(selectedPatient.value);
             newRx.value = { drug: '', dosage: '', usage: '' };
             showAddPrescription.value = false;
+            await syncSelectedPatientRecord({
+                successMessage: '✅ 处方已保存，并已同步到患者个人中心！',
+                fallbackMessage: '✅ 处方已暂存本地，待后端恢复后再同步',
+                failurePrefix: '⚠️ 处方已写入本地，但同步患者个人中心失败：'
+            });
         };
 
-        const removePrescription = (index) => {
+        const removePrescription = async (index) => {
             selectedPatient.value.prescriptions.splice(index, 1);
-            upsertPatient(selectedPatient.value);
+            await syncSelectedPatientRecord({
+                successMessage: '✅ 处方变更已同步到数据库！',
+                fallbackMessage: '✅ 处方变更已暂存本地，待后端恢复后再同步',
+                failurePrefix: '⚠️ 处方变更已写入本地，但同步数据库失败：'
+            });
         };
 
         const queryTerm = (term) => {

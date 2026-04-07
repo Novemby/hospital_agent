@@ -101,6 +101,13 @@ async def recognize(request: RecognizeRequest):
     try:
         model_instance = get_model()
         word, confidence, top_predictions = model_instance.predict_with_details(raw_frames, topk=5)
+
+        # 屏蔽准确率差的类别，识别到时视为无效
+        BLOCKED_LABELS = {"不发烧", "不咳嗽", "不头晕", "不恶心"}
+        if word in BLOCKED_LABELS:
+            word = ""
+            confidence = 0.0
+
         top5_summary = [
             {
                 "rank": item["rank"],

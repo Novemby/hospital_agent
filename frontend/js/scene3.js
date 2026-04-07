@@ -9,6 +9,7 @@ const app = createApp({
         const view = ref(currentId.value ? 'myScene' : 'login');
         const idCardInput = ref('');
         const refreshKey = ref(0);
+        const patientProfile = ref(currentUserInfo || null);
 
         const showReportModal = ref(false);
         const showMedicalRecordModal = ref(false);
@@ -21,8 +22,19 @@ const app = createApp({
 
         const goToRoleSelect = () => { window.location.href = 'index.html'; };
 
+        const formatDate = (value) => {
+            if (!value) return '未登记';
+            const date = new Date(value);
+            if (Number.isNaN(date.getTime())) return value;
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const day = String(date.getDate()).padStart(2, '0');
+            return `${year}-${month}-${day}`;
+        };
+
         const currentPatientName = computed(() => {
             refreshKey.value;
+            if (patientProfile.value?.name) return patientProfile.value.name;
             if (!currentId.value) return '';
             try {
                 const p = getPatientById(currentId.value);
@@ -31,6 +43,44 @@ const app = createApp({
                 return '数据读取异常';
             }
         });
+
+        const displayProfile = computed(() => {
+            refreshKey.value;
+            const localPatient = currentId.value ? getPatientById(currentId.value) : null;
+            const merged = {
+                ...(localPatient || {}),
+                ...(patientProfile.value || {})
+            };
+
+            const genderValue = merged.gender;
+            const genderText = genderValue === 1 ? '男' : (genderValue === 0 ? '女' : '未登记');
+
+            return {
+                name: merged.name || currentPatientName.value || currentId.value || '未登录',
+                genderText,
+                birthDateText: formatDate(merged.birth_date),
+                allergyText: merged.allergy_history || merged.allergy || '无 / 未登记',
+                idCardText: merged.id_card || currentUserInfo?.id_card || '未登记',
+                phoneText: merged.contact_phone || '未登记',
+                deafText: merged.is_deaf ? '是' : '否'
+            };
+        });
+
+        const fetchPatientProfile = async () => {
+            if (!currentId.value) return;
+            try {
+                const response = await fetch(`http://localhost:8000/api/patients/${currentId.value}`);
+                if (!response.ok) return;
+                const data = await response.json();
+                patientProfile.value = data;
+                setCurrentPatient({
+                    ...(getCurrentPatient() || {}),
+                    ...data
+                });
+            } catch (e) {
+                console.error('获取患者档案失败', e);
+            }
+        };
 
         // 🌟 新增：向后端请求真实的病历数据
         const fetchPatientRecords = async () => {
@@ -88,8 +138,10 @@ const app = createApp({
                 }
 
                 setCurrentPatient(backendData);
+                patientProfile.value = backendData;
                 currentId.value = backendData.id;
                 view.value = 'myScene';
+                await fetchPatientProfile();
             } catch (error) {
                 alert(error.message);
             }
@@ -100,6 +152,7 @@ const app = createApp({
             currentId.value = '';
             idCardInput.value = '';
             view.value = 'login';
+            patientProfile.value = null;
             dbRecords.value = []; // 清空数据
         };
 
@@ -107,7 +160,12 @@ const app = createApp({
             if (e.key === 'smart_hospital_patients' || e.key === null) refreshKey.value++;
         };
 
-        onMounted(() => { window.addEventListener('storage', handleStorageChange); });
+        onMounted(() => {
+            window.addEventListener('storage', handleStorageChange);
+            if (currentId.value) {
+                fetchPatientProfile();
+            }
+        });
         onUnmounted(() => { window.removeEventListener('storage', handleStorageChange); });
 
         // 提取存在处方的记录
@@ -116,7 +174,7 @@ const app = createApp({
         });
 
         return {
-            view, currentId, currentPatientName,
+            view, currentId, currentPatientName, displayProfile,
             idCardInput, showReportModal, showMedicalRecordModal,
             showPaymentHistoryModal, showPrescriptionQueryModal,
             dbRecords, loadingRecords, hasPrescriptions,
@@ -157,8 +215,45 @@ const app = createApp({
                         <span class="w-1.5 h-8 bg-purple-600 rounded-full"></span>
                         我的个人中心
                     </h2>
-                    <div class="mb-8 p-4 bg-purple-50 rounded-xl">
+                    <div class="mb-6 p-4 bg-purple-50 rounded-xl">
                         <p class="text-purple-700 font-medium">当前登录患者：{{ currentPatientName || currentId }}</p>
+                    </div>
+                    <div class="mb-8 rounded-3xl border border-slate-200 bg-gradient-to-br from-slate-50 to-white shadow-sm overflow-hidden">
+                        <div class="px-6 py-4 border-b border-slate-100 bg-white/70 flex items-center justify-between">
+                            <div>
+                                <div class="text-xs tracking-[0.2em] text-slate-400 uppercase mb-1">Patient Profile</div>
+                                <div class="text-lg font-bold text-slate-800">个人档案</div>
+                            </div>
+                            <div class="text-xs px-3 py-1 rounded-full bg-purple-50 text-purple-700 border border-purple-100">基础信息</div>
+                        </div>
+                        <div class="p-6 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-x-8 gap-y-5">
+                            <div>
+                                <div class="text-xs text-slate-500 mb-1">姓名</div>
+                                <div class="text-xl font-bold text-slate-900">{{ displayProfile.name }}</div>
+                            </div>
+                            <div>
+                                <div class="text-xs text-slate-500 mb-1">性别</div>
+                                <div class="text-xl font-bold text-slate-900">{{ displayProfile.genderText }}</div>
+                            </div>
+                            <div>
+                                <div class="text-xs text-slate-500 mb-1">出生日期</div>
+                                <div class="text-xl font-bold text-slate-900">{{ displayProfile.birthDateText }}</div>
+                            </div>
+                            <div>
+                                <div class="text-xs text-slate-500 mb-1">身份证号</div>
+                                <div class="text-base font-semibold text-slate-800 break-all">{{ displayProfile.idCardText }}</div>
+                            </div>
+                            <div>
+                                <div class="text-xs text-slate-500 mb-1">联系电话</div>
+                                <div class="text-base font-semibold text-slate-800">{{ displayProfile.phoneText }}</div>
+                            </div>
+                            <div class="md:col-span-2 xl:col-span-1">
+                                <div class="text-xs text-rose-500 mb-1">过敏史</div>
+                                <div class="inline-flex max-w-full items-center rounded-2xl bg-rose-50 text-rose-700 border border-rose-200 px-4 py-2 text-base font-bold break-all">
+                                    {{ displayProfile.allergyText }}
+                                </div>
+                            </div>
+                        </div>
                     </div>
                     <div class="grid grid-cols-2 gap-4 mt-6">
                         <div @click="showReportModal = true" class="bg-green-50 p-6 rounded-xl border border-green-200 cursor-pointer hover:shadow-md transition">
