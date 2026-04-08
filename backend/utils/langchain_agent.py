@@ -1,5 +1,6 @@
 import os
 import json
+import re
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
@@ -412,6 +413,68 @@ def _analyze_word_sequence(words: List[str]) -> Dict[str, Any]:
         "normalized_text": "，".join(normalized_words),
     }
 
+
+def _extract_last_doctor_utterance(context: str) -> str:
+    lines = [line.strip() for line in str(context or "").splitlines() if line.strip()]
+    for line in reversed(lines):
+        if line.startswith("医生：") or line.startswith("医生:"):
+            return line.split("：", 1)[-1].split(":", 1)[-1].strip()
+    return ""
+
+
+def _normalize_patient_sentence(expr: str) -> str:
+    text = str(expr or "").strip()
+    if not text:
+        return ""
+    text = re.sub(r"^(医生您好|医生好|您好|你好)[，,、\s]*", "", text)
+    text = re.sub(r"^(我想说|我这边|我)[，,、\s]*", "", text)
+    text = text.strip("，,、。；; ")
+    return text
+
+
+def _select_focus_answer(last_doctor_utterance: str, patient_expression: str) -> str:
+    doctor = str(last_doctor_utterance or "")
+    patient = str(patient_expression or "")
+    if not doctor or not patient:
+        return patient
+
+    segments = [
+        seg.strip("，,、。；; ")
+        for seg in re.split(r"[，,。！？!?；;]", patient)
+        if seg.strip("，,、。；; ")
+    ]
+    if not segments:
+        return patient
+
+    sleep_keywords = ["睡", "睡眠", "失眠", "入睡", "多梦", "夜间"]
+    if any(keyword in doctor for keyword in ["睡得好不好", "睡得", "睡眠", "失眠", "入睡"]):
+        sleep_seg = next((seg for seg in segments if any(k in seg for k in sleep_keywords)), "")
+        if sleep_seg:
+            if "睡不好" in sleep_seg or "睡不太好" in sleep_seg or "睡得不好" in sleep_seg:
+                return "睡得不好"
+            return sleep_seg
+
+    return patient
+
+
+def _postprocess_consultation_output(output: Dict[str, Any], context: str, analyzed: Dict[str, Any]) -> Dict[str, Any]:
+    if not isinstance(output, dict):
+        return output
+
+    expr = _normalize_patient_sentence(output.get("patient_expression", ""))
+    if not expr:
+        expr = str(analyzed.get("normalized_text") or "").strip()
+
+    last_doctor = _extract_last_doctor_utterance(context)
+    expr = _select_focus_answer(last_doctor, expr)
+    expr = _normalize_patient_sentence(expr)
+
+    if not expr:
+        expr = str(analyzed.get("normalized_text") or "").strip()
+
+    output["patient_expression"] = expr
+    return output
+
 class SmartHospitalAgent:
     def __init__(self):
         self.api_key = os.getenv("OPENAI_API_KEY")
@@ -562,6 +625,9 @@ class SmartHospitalAgent:
                 "5. 患者弱提醒 (patient_gentle_reminder)：只有在命中长期记忆且适合提醒患者补充说明时才输出。必须使用“建议确认”“建议告知医生”“建议进一步说明”这类措辞，绝对禁止出现用药、检查、治疗等建议。\n"
                 "6. memory_hits：只列出本次真正命中的关键词或记忆点，最多 5 个。\n"
                 "【硬约束】\n"
+                "- patient_expression 必须优先回答“医生上一句问题”的核心意图，使用最小必要信息，避免重复医生已知或刚刚说过的旧症状。\n"
+                "- 当医生在追问单一维度（如“睡得好不好”“持续多久”）时，patient_expression 只保留该维度答案。示例：医生问“睡得好不好”，患者词含“头晕、痛、睡不好”，输出应为“睡得不好”。\n"
+                "- patient_expression 需简洁自然，建议 6~18 个汉字，禁止礼貌寒暄开头（如“医生您好”）和“另外、还有”等冗余连接。\n"
                 "- doctor_context、risk_note、patient_gentle_reminder 在未命中相关长期记忆时必须返回空字符串。\n"
                 "- doctor_context 只能写事实，如“患者历史中多次出现腹痛、恶心”。\n"
                 "- risk_note 只能写“与既往高风险症状相似/相关”的提醒，不能扩展为医疗决策。\n"
@@ -574,7 +640,7 @@ class SmartHospitalAgent:
             partial_variables={"format_instructions": parser.get_format_instructions()},
         )
         try:
-            return (prompt | self.llm | parser).invoke({
+            raw_output = (prompt | self.llm | parser).invoke({
                 "context": context or "无上下文",
                 "words": "、".join(words),
                 "normalized_words": "、".join(analyzed["normalized_words"]),
@@ -582,6 +648,7 @@ class SmartHospitalAgent:
                 "negated_words": "、".join(analyzed["negated_words"]) or "无",
                 "patient_profile": patient_profile,
             })
+            return _postprocess_consultation_output(raw_output, context, analyzed)
         except Exception as e:
             print(f"❌ 面诊 Agent 异常: {e}")
             return fallback_res

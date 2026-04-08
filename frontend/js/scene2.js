@@ -17,12 +17,110 @@ const app = createApp({
         const medicalHistoryDraft = ref('');
         const diagnosisDraft = ref('');
         let patientSyncInterval = null;
+        const showEvidenceTimeline = ref(false);
 
         // 🌟 核心修复：把 selectedPatient 挪到最上面！防止后面 computed 用到时报未初始化的错
         const selectedPatient = computed(() => {
             return patients.value.find(p => String(p.id) === String(selectedPatientId.value)) || null;
         });
-        const aiAssistInfo = computed(() => selectedPatient.value?.ai_assist || null);
+        const aiAssistInfo = computed(() => selectedPatient.value?.ai_assist || selectedPatient.value?.aiAssist || null);
+        const normalizeSummaryClause = (text) => String(text || '')
+            .replace(/\s+/g, ' ')
+            .replace(/[。！？；;]+$/g, '')
+            .replace(/^患者(主诉|表示|说|自述)?[:：]?\s*/g, '')
+            .replace(/^主诉[:：]?\s*/g, '')
+            .trim();
+        const canonicalizeSummaryForDisplay = (text) => {
+            let s = normalizeSummaryClause(text);
+            const numberMap = [
+                [/一/g, '1'],
+                [/二|两/g, '2'],
+                [/三/g, '3'],
+                [/四/g, '4'],
+                [/五/g, '5'],
+                [/六/g, '6'],
+                [/七/g, '7'],
+                [/八/g, '8'],
+                [/九/g, '9'],
+                [/十/g, '10']
+            ];
+            numberMap.forEach(([pattern, replacement]) => {
+                s = s.replace(pattern, replacement);
+            });
+            return s.replace(/[，,。；;、\s]/g, '').trim();
+        };
+        const isNearDuplicateDisplay = (a, b) => {
+            const x = canonicalizeSummaryForDisplay(a);
+            const y = canonicalizeSummaryForDisplay(b);
+            if (!x || !y) return false;
+            if (x === y) return true;
+            return x.includes(y) || y.includes(x);
+        };
+        const compactComprehensiveSummary = (text) => {
+            const raw = normalizeSummaryClause(text || '');
+            if (!raw) return '';
+            const parts = raw
+                .split(/[；;]/)
+                .map(item => normalizeSummaryClause(item))
+                .filter(Boolean);
+            const deduped = [];
+            parts.forEach(part => {
+                const idx = deduped.findIndex(item => isNearDuplicateDisplay(item, part));
+                if (idx >= 0) {
+                    deduped[idx] = part.length > deduped[idx].length ? part : deduped[idx];
+                } else {
+                    deduped.push(part);
+                }
+            });
+            return deduped.join('；');
+        };
+
+        const coreSymptomText = computed(() =>
+            normalizeSummaryClause(aiAssistInfo.value?.core_symptom)
+            || selectedPatient.value?.triage_struct?.primary_symptom
+            || ''
+        );
+        const dynamicSummaryText = computed(() =>
+            compactComprehensiveSummary(aiAssistInfo.value?.dynamic_summary)
+            || compactComprehensiveSummary(aiAssistInfo.value?.objective_summary)
+            || compactComprehensiveSummary(selectedPatient.value?.triage_struct?.dynamic_summary)
+            || ''
+        );
+        const comprehensiveSummaryText = computed(() => {
+            const direct = compactComprehensiveSummary(aiAssistInfo.value?.comprehensive_summary || aiAssistInfo.value?.objective_summary || '');
+            const core = normalizeSummaryClause(coreSymptomText.value);
+            const dynamic = normalizeSummaryClause(dynamicSummaryText.value);
+
+            // 优先按“核心 + 动态”合成，避免只显示当前一句而丢失主诉主线。
+            if (core && dynamic) {
+                if (dynamic.includes(core)) return `患者${dynamic}`;
+                return `患者${core}，并伴随${dynamic}`;
+            }
+            if (core) return `患者${core}`;
+            if (dynamic) return `患者${dynamic}`;
+            return direct ? `患者${direct}` : '';
+        });
+        const evidenceTimeline = computed(() => {
+            const raw = aiAssistInfo.value?.evidence_timeline || aiAssistInfo.value?.dynamic_summary_history || [];
+            const list = (Array.isArray(raw) ? raw : []).map(item => {
+                if (typeof item === 'string') {
+                    return {
+                        text: item,
+                        source: '历史摘要',
+                        at: Date.now()
+                    };
+                }
+                return {
+                    text: item?.text || '',
+                    source: item?.source || '历史摘要',
+                    at: Number(item?.at) || Date.now()
+                };
+            }).filter(item => item.text);
+            return list.sort((a, b) => a.at - b.at);
+        });
+        const comprehensiveSummaryUpdatedAt = computed(() =>
+            Number(aiAssistInfo.value?.comprehensive_summary_updated_at || selectedPatient.value?.triage_struct?.summary_updated_at || 0)
+        );
 
         // ========== 2. UI 组件与表单状态 ==========
         const showAddPrescription = ref(false);
@@ -207,6 +305,12 @@ const app = createApp({
             const date = new Date(timestamp);
             return `${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`;
         };
+        const formatEpochTime = (epoch) => {
+            if (!epoch) return '';
+            const date = new Date(Number(epoch));
+            if (Number.isNaN(date.getTime())) return '';
+            return `${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`;
+        };
 
         const goToRoleSelect = () => {
             window.location.href = 'index.html';
@@ -289,6 +393,7 @@ const app = createApp({
         };
 
         watch(selectedPatientId, async () => {
+            showEvidenceTimeline.value = false;
             hydrateDraftFromSelectedPatient();
             await loadSelectedPatientMessages();
         });
@@ -374,14 +479,12 @@ const app = createApp({
         };
 
         const applyAiSummary = () => {
-            if (selectedPatient.value?.triage_struct?.primary_symptom) {
-                const summary = "【AI 辅助提炼】" + selectedPatient.value.triage_struct.primary_symptom;
-                const current = medicalHistoryDraft.value || '';
-                // 如果还没填过，才追加进去，防止重复点击
-                if (!current.includes(summary)) {
-                    medicalHistoryDraft.value = current ? current + '\n\n' + summary : summary;
-                }
-            }
+            if (!comprehensiveSummaryText.value) return;
+
+            const current = medicalHistoryDraft.value || '';
+            const summary = `【AI 综合摘要】${comprehensiveSummaryText.value}`;
+            if (current.includes(summary)) return;
+            medicalHistoryDraft.value = current ? `${current}\n\n${summary}` : summary;
         };
 
         const finishConsultation = async () => {
@@ -531,6 +634,10 @@ const app = createApp({
             view, doctorId, doctorPwd, doctorDept, loginLoading,
             patients, selectedPatientId, selectedPatient,
             aiAssistInfo,
+            coreSymptomText, dynamicSummaryText,
+            comprehensiveSummaryText,
+            evidenceTimeline, comprehensiveSummaryUpdatedAt,
+            showEvidenceTimeline,
             voiceInput,
             selectedTerm, termExplanation,
             showAddPrescription, newRx,
@@ -544,7 +651,7 @@ const app = createApp({
             doctorVoiceText, doctorRecognizedText, isRecordingVoiceForDoc,
             startDoctorVoiceRecording, stopDoctorVoiceRecording,
             sendDoctorVoiceMessage,
-            chatMessages, chatContainerDoc, formatTime,
+            chatMessages, chatContainerDoc, formatTime, formatEpochTime,
             // 🌟 历史病例相关
             showHistoryModal, historicalRecords, loadingHistory, openHistoryModal
         };
@@ -647,7 +754,7 @@ const app = createApp({
                                         <span class="text-xs bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded font-bold">🤖 提前采集</span>
                                     </div>
                                     <div class="flex items-center flex-wrap gap-x-4 gap-y-2 text-base mb-2">
-                                        <div class="flex items-center gap-2"><span class="text-gray-400 text-xs">核心</span><span class="font-bold text-red-600">{{ selectedPatient.triage_struct.primary_symptom || '不适' }}</span></div>
+                                        <div class="flex items-center gap-2"><span class="text-gray-400 text-xs">核心</span><span class="font-bold text-red-600">{{ coreSymptomText || '不适' }}</span></div>
                                         <span class="text-gray-300">|</span>
                                         <div class="flex items-center gap-2"><span class="text-gray-400 text-xs">部位</span><span class="font-medium text-gray-800">{{ selectedPatient.triage_struct.body_part || '未定' }}</span></div>
                                         <span class="text-gray-300">|</span>
@@ -659,6 +766,9 @@ const app = createApp({
                                     </div>
                                     <div v-if="selectedPatient.triage_struct.accompanying_symptoms && selectedPatient.triage_struct.accompanying_symptoms.length > 0" class="text-xs text-gray-500 mt-1">
                                         伴随症状：<span v-for="sym in selectedPatient.triage_struct.accompanying_symptoms" :key="sym" class="bg-orange-100 text-orange-700 px-2 py-0.5 rounded shadow-sm mr-2">{{ sym }}</span>
+                                    </div>
+                                    <div v-if="dynamicSummaryText" class="text-xs text-gray-600 mt-2 bg-white p-2.5 rounded-lg border border-indigo-100 leading-relaxed">
+                                        <span class="font-medium text-gray-500 mr-1">动态摘要：</span>{{ dynamicSummaryText }}
                                     </div>
                                     
                                     <div v-if="selectedPatient.triage_struct.original_text" class="text-xs text-gray-500 mt-3 bg-white p-3 rounded-lg border border-indigo-50 leading-relaxed italic shadow-inner">
@@ -672,7 +782,7 @@ const app = createApp({
                             </div>
                         </div>
 
-                        <div v-if="aiAssistInfo && (aiAssistInfo.objective_summary || aiAssistInfo.doctor_context || aiAssistInfo.risk_note)" class="bg-white rounded-2xl shadow-sm border border-slate-200 mb-6 overflow-hidden">
+                        <div v-if="aiAssistInfo && (comprehensiveSummaryText || aiAssistInfo.doctor_context || aiAssistInfo.risk_note)" class="bg-white rounded-2xl shadow-sm border border-slate-200 mb-6 overflow-hidden">
                             <div class="flex flex-col xl:flex-row xl:items-stretch">
                                 <div class="xl:w-44 shrink-0 px-5 py-4 border-b xl:border-b-0 xl:border-r border-slate-200 bg-slate-50">
                                     <div class="text-[11px] font-bold tracking-[0.18em] text-slate-500 uppercase mb-1">Clinical AI</div>
@@ -685,13 +795,37 @@ const app = createApp({
                                             <div class="text-sm leading-6 text-slate-800">{{ aiAssistInfo.risk_note }}</div>
                                         </div>
                                         <div class="grid grid-cols-1 2xl:grid-cols-2 gap-2">
-                                            <div v-if="aiAssistInfo.objective_summary" class="flex items-start gap-3 rounded-xl border border-indigo-100 bg-indigo-50/70 px-4 py-3">
-                                                <div class="mt-0.5 text-indigo-600 text-sm font-bold shrink-0">提炼</div>
-                                                <div class="text-sm leading-6 text-slate-800">{{ aiAssistInfo.objective_summary }}</div>
+                                            <div v-if="comprehensiveSummaryText" class="flex items-start gap-3 rounded-xl border border-indigo-100 bg-indigo-50/70 px-4 py-3">
+                                                <div class="mt-0.5 text-indigo-600 text-sm font-bold shrink-0">综合摘要</div>
+                                                <div class="flex-1">
+                                                    <div class="text-sm leading-6 text-slate-800">{{ comprehensiveSummaryText }}</div>
+                                                    <div class="mt-1 text-xs text-slate-500" v-if="comprehensiveSummaryUpdatedAt || evidenceTimeline.length">
+                                                        <span v-if="comprehensiveSummaryUpdatedAt">更新时间：{{ formatEpochTime(comprehensiveSummaryUpdatedAt) }}</span>
+                                                        <span v-if="comprehensiveSummaryUpdatedAt && evidenceTimeline.length"> · </span>
+                                                        <span v-if="evidenceTimeline.length">证据 {{ evidenceTimeline.length }} 条</span>
+                                                        <button
+                                                            v-if="evidenceTimeline.length"
+                                                            @click="showEvidenceTimeline = !showEvidenceTimeline"
+                                                            class="ml-2 text-indigo-600 hover:text-indigo-700 underline-offset-2 hover:underline"
+                                                        >
+                                                            {{ showEvidenceTimeline ? '收起证据' : '查看证据' }}
+                                                        </button>
+                                                    </div>
+                                                </div>
                                             </div>
                                             <div v-if="aiAssistInfo.doctor_context" class="flex items-start gap-3 rounded-xl border border-cyan-100 bg-cyan-50/70 px-4 py-3">
                                                 <div class="mt-0.5 text-cyan-700 text-sm font-bold shrink-0">辅助</div>
                                                 <div class="text-sm leading-6 text-slate-800">{{ aiAssistInfo.doctor_context }}</div>
+                                            </div>
+                                        </div>
+                                        <div v-if="showEvidenceTimeline && evidenceTimeline.length" class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                                            <div class="text-xs font-bold text-slate-600 mb-2">证据时间线（最近）</div>
+                                            <div class="space-y-1.5">
+                                                <div v-for="(ev, idx) in evidenceTimeline.slice(-4)" :key="idx" class="text-xs text-slate-700 flex items-center gap-2">
+                                                    <span class="px-1.5 py-0.5 rounded bg-white border border-slate-200 text-slate-500 shrink-0">{{ formatEpochTime(ev.at) || '--:--' }}</span>
+                                                    <span class="px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-700 shrink-0">{{ ev.source }}</span>
+                                                    <span class="truncate">{{ ev.text }}</span>
+                                                </div>
                                             </div>
                                         </div>
                                     </div>
@@ -710,7 +844,7 @@ const app = createApp({
                                 <h3 class="font-bold text-lg flex items-center gap-2"><span class="w-1.5 h-5 bg-blue-500 rounded-full"></span>病历记录与医嘱</h3>
                                 <div class="flex gap-2">
                                     <!-- 🌟 只有当 AI 提炼了新内容时，才显示这个轻量级按钮 -->
-                                    <button v-if="selectedPatient?.triage_struct?.primary_symptom" @click="applyAiSummary" class="text-xs bg-indigo-50 text-indigo-600 border border-indigo-200 px-3 py-1.5 rounded-full hover:bg-indigo-100 font-medium flex items-center transition-colors">
+                                    <button v-if="comprehensiveSummaryText" @click="applyAiSummary" class="text-xs bg-indigo-50 text-indigo-600 border border-indigo-200 px-3 py-1.5 rounded-full hover:bg-indigo-100 font-medium flex items-center transition-colors">
                                         ✨ 一键填入 AI 摘要
                                     </button>
                                     <button @click="saveMedicalHistory" class="text-sm bg-green-50 text-green-600 px-4 py-1.5 rounded-full hover:bg-green-100 font-medium transition-colors">

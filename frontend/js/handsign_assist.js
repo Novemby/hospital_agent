@@ -337,6 +337,150 @@ const app = createApp({
             agent.clearSequence();
         };
 
+        const normalizeSummaryText = (text) => {
+            return String(text || '')
+                .replace(/\s+/g, ' ')
+                .replace(/[。！？；;]+$/g, '')
+                .trim();
+        };
+
+        const normalizeSymptomPhrase = (text) => {
+            return normalizeSummaryText(text)
+                .replace(/^患者(主诉|表示|说|自述)?[:：]?\s*/g, '')
+                .replace(/^主诉[:：]?\s*/g, '')
+                .replace(/^我(有|觉得|感觉)?\s*/g, '');
+        };
+
+        const canonicalizeForCompare = (text) => {
+            let s = normalizeSymptomPhrase(text);
+            const numberMap = [
+                [/一/g, '1'],
+                [/二|两/g, '2'],
+                [/三/g, '3'],
+                [/四/g, '4'],
+                [/五/g, '5'],
+                [/六/g, '6'],
+                [/七/g, '7'],
+                [/八/g, '8'],
+                [/九/g, '9'],
+                [/十/g, '10']
+            ];
+            numberMap.forEach(([pattern, replacement]) => {
+                s = s.replace(pattern, replacement);
+            });
+            return s
+                .replace(/[，,。；;、\s]/g, '')
+                .replace(/曾|近期|最近|可能|大概/g, '')
+                .trim();
+        };
+
+        const isNearDuplicateSummary = (a, b) => {
+            const x = canonicalizeForCompare(a);
+            const y = canonicalizeForCompare(b);
+            if (!x || !y) return false;
+            if (x === y) return true;
+            if (x.includes(y) || y.includes(x)) return true;
+            return false;
+        };
+
+        const mergeDynamicSummaryHistory = (existingHistory = [], incomingText = '', maxItems = 6) => {
+            const history = (Array.isArray(existingHistory) ? existingHistory : [])
+                .map(item => normalizeSummaryText(typeof item === 'string' ? item : item?.text || ''))
+                .filter(Boolean);
+            const incoming = normalizeSummaryText(incomingText);
+            if (!incoming) return history.slice(-maxItems);
+
+            let replaced = false;
+            for (let i = 0; i < history.length; i++) {
+                if (isNearDuplicateSummary(history[i], incoming)) {
+                    // 近似重复时保留信息量更高的描述（更长通常更完整）
+                    history[i] = incoming.length > history[i].length ? incoming : history[i];
+                    replaced = true;
+                    break;
+                }
+            }
+            if (!replaced && !history.includes(incoming)) history.push(incoming);
+            return history.slice(-maxItems);
+        };
+
+        const buildDynamicSummary = (history = []) => {
+            const rawItems = (Array.isArray(history) ? history : [])
+                .map(item => normalizeSymptomPhrase(item))
+                .filter(Boolean);
+
+            const deduped = [];
+            rawItems.forEach(item => {
+                const idx = deduped.findIndex(existing => isNearDuplicateSummary(existing, item));
+                if (idx >= 0) {
+                    deduped[idx] = item.length > deduped[idx].length ? item : deduped[idx];
+                } else {
+                    deduped.push(item);
+                }
+            });
+
+            return deduped.join('；');
+        };
+
+        const buildComprehensiveSummary = (coreSymptom = '', history = []) => {
+            const core = normalizeSymptomPhrase(coreSymptom);
+            const fragments = (Array.isArray(history) ? history : [])
+                .map(item => normalizeSymptomPhrase(item))
+                .filter(Boolean);
+
+            const unique = [];
+            const pushUnique = (v) => {
+                const text = normalizeSymptomPhrase(v);
+                if (text && !unique.includes(text)) unique.push(text);
+            };
+
+            if (core) pushUnique(core);
+            fragments.forEach(pushUnique);
+
+            if (!unique.length) return '';
+            if (unique.length === 1) return `患者${unique[0]}`;
+
+            const head = core || unique[0];
+            const tail = unique.filter(item => item !== head);
+            if (!tail.length) return `患者${head}`;
+            return `患者${head}，并伴随${tail.join('、')}`;
+        };
+
+        const mergeEvidenceTimeline = (existingTimeline = [], incoming = {}, maxItems = 10) => {
+            const normalized = (Array.isArray(existingTimeline) ? existingTimeline : [])
+                .map(item => {
+                    if (typeof item === 'string') {
+                        return {
+                            text: normalizeSymptomPhrase(item),
+                            source: '历史摘要',
+                            at: Date.now()
+                        };
+                    }
+                    return {
+                        text: normalizeSymptomPhrase(item?.text || ''),
+                        source: normalizeSummaryText(item?.source || '历史摘要') || '历史摘要',
+                        at: Number(item?.at) || Date.now()
+                    };
+                })
+                .filter(item => item.text);
+
+            const text = normalizeSymptomPhrase(incoming?.text || '');
+            if (text) {
+                const source = normalizeSummaryText(incoming?.source || '本轮对话') || '本轮对话';
+                const at = Number(incoming?.at) || Date.now();
+                const dupIndex = normalized.findIndex(item => isNearDuplicateSummary(item.text, text));
+                if (dupIndex >= 0) {
+                    if (text.length > String(normalized[dupIndex].text || '').length) {
+                        normalized[dupIndex] = { text, source, at };
+                    }
+                } else {
+                    normalized.push({ text, source, at });
+                }
+            }
+
+            normalized.sort((a, b) => a.at - b.at);
+            return normalized.slice(-maxItems);
+        };
+
         // ==================== 🌟 Agent 核心逻辑 ====================
 
         const callAgentPolish = async (wordsArray) => {
@@ -373,35 +517,47 @@ const app = createApp({
                         patientReminder.value = data.patient_gentle_reminder || '';
                         memoryHits.value = Array.isArray(data.memory_hits) ? data.memory_hits : [];
 
-                        if (aiSummary.value.trim() !== "") {
-                            const p = getPatientById(patientId);
-                            if (p) {
-                                p.triage_struct = {
-                                    ...p.triage_struct,
-                                    primary_symptom: aiSummary.value,
-                                    original_text: finalSentence
-                                };
-                                p.ai_assist = {
-                                    objective_summary: aiSummary.value,
-                                    doctor_context: doctorContext.value,
-                                    risk_note: riskNote.value,
-                                    patient_gentle_reminder: patientReminder.value,
-                                    memory_hits: memoryHits.value,
-                                    patient_expression: finalSentence
-                                };
-                                upsertPatient(p);
-                            }
-                        }
                         const p = getPatientById(patientId);
                         if (p) {
+                            const existingCore = normalizeSymptomPhrase(p?.triage_struct?.primary_symptom || '');
+                            const incomingObjective = normalizeSymptomPhrase(aiSummary.value);
+                            const incomingExpression = normalizeSymptomPhrase(finalSentence);
+                            const coreSymptom = existingCore || incomingObjective || incomingExpression;
+
+                            const existingHistory = p?.ai_assist?.dynamic_summary_history || p?.aiAssist?.dynamic_summary_history || [];
+                            const incomingDynamic = incomingObjective || incomingExpression;
+                            const dynamicHistory = mergeDynamicSummaryHistory(existingHistory, incomingDynamic);
+                            const dynamicSummary = buildDynamicSummary(dynamicHistory);
+                            const comprehensiveSummary = buildComprehensiveSummary(coreSymptom, dynamicHistory);
+                            const existingTimeline = p?.ai_assist?.evidence_timeline || p?.aiAssist?.evidence_timeline || existingHistory;
+                            const evidenceTimeline = mergeEvidenceTimeline(existingTimeline, {
+                                text: incomingDynamic,
+                                source: incomingObjective ? '本轮客观提炼' : '本轮患者原话',
+                                at: Date.now()
+                            });
+
+                            p.triage_struct = {
+                                ...p.triage_struct,
+                                primary_symptom: coreSymptom || p?.triage_struct?.primary_symptom || '',
+                                dynamic_summary: dynamicSummary,
+                                summary_updated_at: Date.now(),
+                                original_text: finalSentence
+                            };
                             p.ai_assist = {
-                                objective_summary: aiSummary.value,
+                                objective_summary: comprehensiveSummary,
+                                comprehensive_summary: comprehensiveSummary,
+                                core_symptom: coreSymptom,
+                                dynamic_summary: dynamicSummary,
+                                dynamic_summary_history: dynamicHistory,
+                                evidence_timeline: evidenceTimeline,
+                                comprehensive_summary_updated_at: Date.now(),
                                 doctor_context: doctorContext.value,
                                 risk_note: riskNote.value,
                                 patient_gentle_reminder: patientReminder.value,
                                 memory_hits: memoryHits.value,
                                 patient_expression: finalSentence
                             };
+                            p.aiAssist = p.ai_assist;
                             upsertPatient(p);
                         }
                     }
@@ -454,7 +610,7 @@ const app = createApp({
         };
     },
     template: `
-        <div class="min-h-screen bg-[#f8fafc] flex flex-col p-4 md:p-6 font-sans relative">
+        <div class="h-[100dvh] box-border overflow-hidden bg-[#f8fafc] flex flex-col p-4 md:p-6 font-sans relative">
             
             <!-- 🌟 划词翻译：悬浮【解释】按钮 -->
             <div id="explain-float-btn" 
@@ -514,10 +670,10 @@ const app = createApp({
             </div>
 
             <!-- 主内容区 -->
-            <div class="flex-1 bg-white rounded-b-2xl shadow-xl flex flex-col lg:flex-row overflow-hidden border border-[#e2e8f0] border-t-0">
+            <div class="flex-1 min-h-0 bg-white rounded-b-2xl shadow-xl flex flex-col lg:flex-row overflow-hidden border border-[#e2e8f0] border-t-0">
                 
                 <!-- 左侧：手语捕捉区 -->
-                <div class="w-full lg:w-[45%] p-6 flex flex-col bg-white border-r border-[#e2e8f0]">
+                <div class="w-full lg:w-[45%] min-h-0 overflow-hidden p-6 flex flex-col bg-white border-r border-[#e2e8f0]">
                     <h2 class="text-[1.1rem] font-bold mb-4 flex items-center gap-2 text-gray-800">
                         <span class="w-1.5 h-5 bg-[#3b82f6] rounded-full"></span>
                         请面对屏幕，用手语回答医生
@@ -553,10 +709,10 @@ const app = createApp({
                 </div>
 
                 <!-- 🌟 右侧：医患双向沟通与输入区 (添加 @mouseup 监听划词) -->
-                <div class="w-full lg:w-[55%] flex flex-col bg-white" @mouseup="handleMouseUp">
+                <div class="w-full lg:w-[55%] min-h-0 overflow-hidden flex flex-col bg-white" @mouseup="handleMouseUp">
                     
                     <!-- 聊天室 -->
-                    <div class="flex-1 flex flex-col overflow-hidden bg-white">
+                    <div class="flex-1 min-h-0 flex flex-col overflow-hidden bg-white">
                         <div class="px-6 py-4 border-b border-[#e2e8f0] shrink-0 flex justify-between items-center">
                             <h2 class="text-[1.1rem] font-bold flex items-center gap-2 text-gray-800">
                                 <span class="w-1.5 h-5 bg-[#6366f1] rounded-full"></span>
@@ -576,7 +732,7 @@ const app = createApp({
                         </div>
                         
                         <!-- 聊天滚动区，划词翻译主要在这个区域生效 -->
-                        <div ref="chatContainer" class="flex-1 overflow-y-auto p-6 space-y-6 scrollbar-thin selection:bg-indigo-200 selection:text-indigo-900">
+                        <div ref="chatContainer" class="h-0 flex-1 min-h-0 overflow-y-scroll overscroll-contain p-6 space-y-6 scrollbar-thin selection:bg-indigo-200 selection:text-indigo-900">
                             <div v-if="chatMessages.length === 0" class="text-center text-gray-400 text-sm mt-10">
                                 医生已就绪，等待沟通...
                             </div>
