@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 from datetime import datetime
 from typing import Optional
 
@@ -79,6 +80,16 @@ SYMPTOM_FOLLOWUP_RULES = [
         "options": ["今天刚开始", "1-3天", "超过1周", "很久了"],
     },
 ]
+
+SIGN_TOKEN_CANONICAL_MAP = {
+    "头（脑）": "头",
+    "他（她、它）": "他",
+    "医生（大夫）": "医生",
+    "反复（重复）": "反复",
+    "肚子": "肚",
+    "胃部": "胃",
+    "喉咙": "咽",
+}
 
 
 # ===========================================================================
@@ -190,6 +201,65 @@ def _detect_period(text: str) -> Optional[str]:
     if "下午" in t or t in ["pm", "晚上", "傍晚"]:
         return "下午"
     return None
+
+
+def _normalize_sign_like_input(raw_text: str) -> str:
+    """
+    对手语识别常见词形做轻量归一化，并补全可推断的症状组合词，
+    避免「头（脑） 痛」这类输入无法命中症状抽取规则。
+    """
+    text = str(raw_text or "").strip()
+    if not text:
+        return ""
+
+    cleaned = text.replace("（", "(").replace("）", ")")
+    cleaned = re.sub(r"[，。！？；、,.!?;]", " ", cleaned)
+    tokens = [token.strip() for token in cleaned.split() if token.strip()]
+
+    normalized_tokens = []
+    for token in tokens:
+        bracket_match = re.match(r"^(.+?)[(].*[)]$", token)
+        if bracket_match:
+            token = bracket_match.group(1).strip()
+        token = SIGN_TOKEN_CANONICAL_MAP.get(token, token)
+        normalized_tokens.append(token)
+
+    token_set = set(normalized_tokens)
+    inferred_symptoms = []
+    if {"头", "痛"}.issubset(token_set):
+        inferred_symptoms.append("头痛")
+    if {"头", "晕"}.issubset(token_set):
+        inferred_symptoms.append("头晕")
+    if {"胸", "闷"}.issubset(token_set):
+        inferred_symptoms.append("胸闷")
+    if {"胸", "痛"}.issubset(token_set):
+        inferred_symptoms.append("胸痛")
+    if {"咽", "痛"}.issubset(token_set):
+        inferred_symptoms.append("咽痛")
+    if ({"肚", "痛"}.issubset(token_set) or {"腹", "痛"}.issubset(token_set) or {"胃", "痛"}.issubset(token_set)):
+        inferred_symptoms.append("腹痛")
+    if "热" in token_set and "发热" not in text and "发烧" not in text:
+        inferred_symptoms.append("发热")
+    if (
+        "痛" in token_set
+        and not ({"头", "胸", "肚", "腹", "胃", "咽"} & token_set)
+        and "疼痛" not in text
+    ):
+        inferred_symptoms.append("疼痛")
+
+    parts = [text]
+    normalized_text = " ".join(normalized_tokens).strip()
+    if normalized_text and normalized_text != text:
+        parts.append(normalized_text)
+    if inferred_symptoms:
+        parts.append(" ".join(inferred_symptoms))
+
+    merged = []
+    for part in parts:
+        item = str(part or "").strip()
+        if item and item not in merged:
+            merged.append(item)
+    return " ".join(merged).strip()
 
 
 def _normalize_symptom_term(symptom: str) -> str:
@@ -724,7 +794,8 @@ def registration_agent_chat(payload: schemas.RegistrationAgentChatRequest, db: S
         "soft_ask_count": 0,
     })
 
-    text = payload.message.strip()
+    raw_text = payload.message.strip()
+    text = _normalize_sign_like_input(raw_text)
     session["_last_text_for_department"] = text
 
     if "重新描述" in text:
@@ -767,9 +838,9 @@ def registration_agent_chat(payload: schemas.RegistrationAgentChatRequest, db: S
     _log_rule_snapshot("post_rule_merge", text, session)
 
     # 确保原话永远在追加
-    if text and text not in str(session["symptom_struct"].get("original_text", "")):
+    if raw_text and raw_text not in str(session["symptom_struct"].get("original_text", "")):
         session["symptom_struct"]["original_text"] = (
-                str(session["symptom_struct"].get("original_text", "")) + " " + text).strip()
+                str(session["symptom_struct"].get("original_text", "")) + " " + raw_text).strip()
 
     session["slots"]["department"] = _select_department(session, decision) or session["slots"].get("department")
 
