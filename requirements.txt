@@ -1,14 +1,31 @@
+# Web 框架
 fastapi==0.115.6
-uvicorn==0.30.6
+uvicorn[standard]==0.30.6
+python-multipart==0.0.12
+
+# 数据库
 sqlalchemy==2.0.36
 pymysql==1.1.1
+
+# 数据校验
 pydantic==2.9.2
-python-multipart==0.0.12
+
+# 环境变量
+python-dotenv==1.0.1
+
+# LangChain / LLM
 langchain==0.3.7
 langchain-core==0.3.18
 langchain-openai==0.2.8
+
+# HTTP 请求（百度语音 API）
+requests==2.32.3
+
+# 音频处理
+pydub==0.25.1
+
+# 手语识别模型
+# 注意：服务器无 GPU 时请替换为 CPU 版本：
+# pip install torch --index-url https://download.pytorch.org/whl/cpu
 torch==2.0.1
 numpy==1.24.3
-langchain==0.3.7
-langchain-core==0.3.18
-langchain-openai==0.2.8

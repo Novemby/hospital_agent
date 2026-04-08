@@ -29,7 +29,7 @@ export class SignLanguageAgent {
             onToggleByGesture: () => {},
             cameraWidth: 640,
             cameraHeight: 480,
-            drawPose: false,
+            drawPose: true,
             drawHands: true,
             ...options
         };
@@ -236,7 +236,7 @@ export class SignLanguageAgent {
 
         // 绘制关节点
         if (this.options.drawPose && results.poseLandmarks) {
-            drawConnectors(this.ctx, results.poseLandmarks, this.POSE_CONNECTIONS, { color: '#00FF8866', lineWidth: 2 });
+            drawConnectors(this.ctx, results.poseLandmarks, this.POSE_CONNECTIONS, { color: '#00FF00', lineWidth: 1 });
         }
         if (this.options.drawHands && results.leftHandLandmarks) {
             drawConnectors(this.ctx, results.leftHandLandmarks, this.HAND_CONNECTIONS, { color: '#FF6B6B', lineWidth: 3 });
@@ -539,8 +539,10 @@ export class SignLanguageAgent {
             }
 
             this.displayResult(bestWord, bestConf, bestTopPredictions);
-            this.options.onResult({ prediction: bestWord, confidence: bestConf, topPredictions: bestTopPredictions });
-            this.options.onStatusChange('resultReady', { prediction: bestWord, confidence: bestConf, topPredictions: bestTopPredictions });
+            if (bestWord !== '开始结束') {
+                this.options.onResult({ prediction: bestWord, confidence: bestConf, topPredictions: bestTopPredictions });
+                this.options.onStatusChange('resultReady', { prediction: bestWord, confidence: bestConf, topPredictions: bestTopPredictions });
+            }
             if (this.continuousMode) {
                 this.options.onStatusChange('continuousReady');
             }
@@ -552,6 +554,7 @@ export class SignLanguageAgent {
 
     displayResult(prediction, confidence, topPredictions = []) {
         if (prediction === '无意义词') return;
+        if (prediction === '开始结束') return;
         // 连续识别模式：跳过稳定性投票，直接输出，仅做短时去重
         if (this.continuousMode) {
             const now = Date.now();
@@ -706,6 +709,13 @@ export class SignLanguageAgent {
         if (this.camera) {
             this.camera.stop();
             this.cameraStarted = false;
+        }
+        // 重置画布尺寸缓存，确保下次启动时重新计算
+        this.lastCanvasWidth = 0;
+        this.lastCanvasHeight = 0;
+        // 清空画布残留画面
+        if (this.canvas && this.ctx) {
+            this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
         }
     }
 

@@ -6,7 +6,12 @@ from sqlalchemy.orm import sessionmaker, declarative_base
 SQLALCHEMY_DATABASE_URL = "mysql+pymysql://root:123456@localhost:3306/medical_agent_db?charset=utf8mb4"
 
 # 创建引擎
-engine = create_engine(SQLALCHEMY_DATABASE_URL, echo=False) # echo=True 可以在控制台看到生成的SQL语句
+engine = create_engine(
+    SQLALCHEMY_DATABASE_URL,
+    echo=False,
+    pool_pre_ping=True,  # 取连接前先 ping，失效自动重连，解决 Lost connection 问题
+    pool_recycle=1800,   # 连接最多复用 30 分钟，避免超过 MySQL wait_timeout
+)
 
 # 创建会话工厂
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
