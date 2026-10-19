@@ -1,0 +1,16 @@
+{"id":"RAG-SMOKE-001","question":"听力相关就诊可以了解哪个科室？","expected_route":"knowledge","expected_doc_ids":["DEPT-ENT"],"answer_checks":["介绍耳鼻喉科服务范围","不作诊断或承诺检查已开设"],"scope":"hospital_sys_demo"}
+{"id":"RAG-SMOKE-002","question":"骨科就诊前带什么资料？","expected_route":"knowledge","expected_doc_ids":["DEPT-ORTHOPEDICS"],"answer_checks":["已有影像或受伤情况资料","文字沟通需求"],"scope":"hospital_sys_demo"}
+{"id":"RAG-SMOKE-003","question":"孩子看儿科要准备什么？","expected_route":"knowledge","expected_doc_ids":["DEPT-PEDIATRICS"],"answer_checks":["既往病历和已有报告","不编造接诊年龄"],"scope":"hospital_sys_demo"}
+{"id":"RAG-SMOKE-004","question":"第一次在系统挂号怎么说？","expected_route":"knowledge","expected_doc_ids":["REG-001"],"answer_checks":["科室、日期、时段","识别结果确认"],"scope":"hospital_sys_demo"}
+{"id":"RAG-SMOKE-005","question":"匹配到号源就表示挂号成功了吗？","expected_route":"knowledge","expected_doc_ids":["REG-002"],"answer_checks":["尚需确认与提交成功","核对挂号结果"],"scope":"hospital_sys_demo"}
+{"id":"RAG-SMOKE-006","question":"挂号还没确认，想重新说一遍怎么办？","expected_route":"knowledge","expected_doc_ids":["REG-003"],"answer_checks":["重新描述","再次核对信息"],"scope":"hospital_sys_demo"}
+{"id":"RAG-SMOKE-007","question":"听不清叫号怎么办？","expected_route":"knowledge","expected_doc_ids":["REG-004","ACCESS-004"],"answer_checks":["询问可视或人工提醒","不承诺短信或振动功能"],"scope":"hospital_sys_demo"}
+{"id":"RAG-SMOKE-008","question":"手语识别错了怎么办？","expected_route":"knowledge","expected_doc_ids":["ACCESS-002"],"answer_checks":["核对或切换候选","重试或文字输入"],"scope":"hospital_sys_demo"}
+{"id":"RAG-SMOKE-009","question":"AI润色把没有头痛改成头痛怎么办？","expected_route":"knowledge","expected_doc_ids":["ACCESS-003"],"answer_checks":["核对否定词","更正后提供给医生"],"scope":"hospital_sys_demo"}
+{"id":"RAG-SMOKE-010","question":"本院能免费借轮椅吗？","expected_route":"fallback","expected_doc_ids":["ACCESS-004"],"answer_checks":["费用及可用性未知","向医院核实"],"scope":"hospital_sys_demo"}
+{"id":"RAG-SMOKE-011","question":"人工手语翻译几点上班？","expected_route":"fallback","expected_doc_ids":["ACCESS-001","ACCESS-004"],"answer_checks":["未收录排班","不编造时间"],"scope":"hospital_sys_demo"}
+{"id":"RAG-SMOKE-012","question":"明天上午耳鼻喉科还剩几个号？","expected_route":"business_query","expected_doc_ids":["REG-002"],"answer_checks":["实时查询号源","不从文档推测数字"],"scope":"hospital_sys_demo"}
+{"id":"RAG-SMOKE-013","question":"我做检查，能吃饭吗？","expected_route":"clarify","expected_doc_ids":["EXAM-001"],"answer_checks":["询问完整检查项目","按医嘱核实"],"scope":"hospital_sys_demo"}
+{"id":"RAG-SMOKE-014","question":"做B超需要憋尿吗？","expected_route":"clarify","expected_doc_ids":["EXAM-003"],"answer_checks":["询问部位和方式","不统一给出憋尿要求"],"scope":"hospital_sys_demo"}
+{"id":"RAG-SMOKE-015","question":"抽血前要停药吗？","expected_route":"clarify","expected_doc_ids":["EXAM-002"],"answer_checks":["核对项目及医嘱","不自行停药"],"scope":"hospital_sys_demo"}
+{"id":"RAG-SMOKE-016","question":"CT报告几点出来，取报告在哪层？","expected_route":"fallback","expected_doc_ids":["EXAM-004","BOUNDARY-001"],"answer_checks":["时间及地点未收录","向医院确认"],"scope":"hospital_sys_demo"}

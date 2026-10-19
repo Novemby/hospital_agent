@@ -1,0 +1,7 @@
+# Standalone RAG CLI environment, Python 3.9-3.12.
+# Keep separate from legacy sign-model numpy/torch pins in requirements.txt.
+numpy==1.26.4
+faiss-cpu==1.8.0.post1
+PyYAML==6.0.2
+fastapi==0.115.6
+uvicorn==0.30.6

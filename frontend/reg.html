@@ -6,6 +6,7 @@
     <title>智慧医院 · 挂号场景</title>
     <link rel="stylesheet" href="./css/global.css">
     <link rel="stylesheet" href="./css/scene1.css?v=20260405-3">
+    <link rel="stylesheet" href="./css/knowledge.css?v=20261010">
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- MediaPipe 依赖 -->
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3/camera_utils.js" crossorigin="anonymous"></script>
@@ -21,6 +22,8 @@
 </head>
 <body class="bg-slate-100 font-sans">
     <div id="app"></div>
+    <div data-knowledge-widget data-mode="dialog"></div>
+    <script type="module" src="./js/knowledge.js?v=20261010"></script>
     <script type="module" src="./js/scene1.js?v=20260405-3"></script>
 </body>
 </html>

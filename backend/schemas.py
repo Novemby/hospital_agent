@@ -1,5 +1,5 @@
 from datetime import date
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any
 from enum import Enum
 
@@ -87,6 +87,7 @@ class RegistrationAgentChatRequest(BaseModel):
     session_id: str
     patient_id: int
     message: str
+    request_id: Optional[str] = Field(default=None, min_length=1, max_length=128)
 
 class AgentResponse(BaseModel):
     reply: str

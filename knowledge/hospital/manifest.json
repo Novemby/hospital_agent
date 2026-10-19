@@ -1,0 +1,147 @@
+{
+  "schema_version": 1,
+  "hospital_id": "hospital_sys_demo",
+  "status": "demo_unreviewed",
+  "updated_at": "2026-10-02",
+  "document_count": 23,
+  "documents": [
+    {
+      "doc_id": "DEPT-ORTHOPEDICS",
+      "path": "departments/orthopedics.md",
+      "title": "骨科就诊服务介绍",
+      "category": "department"
+    },
+    {
+      "doc_id": "DEPT-FEVER",
+      "path": "departments/fever.md",
+      "title": "发热门诊就诊服务介绍",
+      "category": "department"
+    },
+    {
+      "doc_id": "DEPT-CHECKUP",
+      "path": "departments/checkup.md",
+      "title": "体检中心就诊服务介绍",
+      "category": "department"
+    },
+    {
+      "doc_id": "DEPT-ENT",
+      "path": "departments/ent.md",
+      "title": "耳鼻喉科就诊服务介绍",
+      "category": "department"
+    },
+    {
+      "doc_id": "DEPT-INTERNAL",
+      "path": "departments/internal.md",
+      "title": "内科就诊服务介绍",
+      "category": "department"
+    },
+    {
+      "doc_id": "DEPT-SURGERY",
+      "path": "departments/surgery.md",
+      "title": "外科就诊服务介绍",
+      "category": "department"
+    },
+    {
+      "doc_id": "DEPT-PEDIATRICS",
+      "path": "departments/pediatrics.md",
+      "title": "儿科就诊服务介绍",
+      "category": "department"
+    },
+    {
+      "doc_id": "DEPT-GYNECOLOGY",
+      "path": "departments/gynecology.md",
+      "title": "妇科就诊服务介绍",
+      "category": "department"
+    },
+    {
+      "doc_id": "DEPT-NEUROLOGY",
+      "path": "departments/neurology.md",
+      "title": "神经内科就诊服务介绍",
+      "category": "department"
+    },
+    {
+      "doc_id": "DEPT-DERMATOLOGY",
+      "path": "departments/dermatology.md",
+      "title": "皮肤科就诊服务介绍",
+      "category": "department"
+    },
+    {
+      "doc_id": "REG-001",
+      "path": "registration/start.md",
+      "title": "首次使用与挂号准备",
+      "category": "registration"
+    },
+    {
+      "doc_id": "REG-002",
+      "path": "registration/confirm.md",
+      "title": "号源查询与确认挂号",
+      "category": "registration"
+    },
+    {
+      "doc_id": "REG-003",
+      "path": "registration/change.md",
+      "title": "无号源、修改信息与取消咨询",
+      "category": "registration"
+    },
+    {
+      "doc_id": "REG-004",
+      "path": "registration/waiting.md",
+      "title": "候诊与面诊沟通准备",
+      "category": "registration"
+    },
+    {
+      "doc_id": "EXAM-001",
+      "path": "examinations/general.md",
+      "title": "检查预约与准备事项确认",
+      "category": "examination"
+    },
+    {
+      "doc_id": "EXAM-002",
+      "path": "examinations/blood_test.md",
+      "title": "抽血检验前的信息核对",
+      "category": "examination"
+    },
+    {
+      "doc_id": "EXAM-003",
+      "path": "examinations/ultrasound.md",
+      "title": "超声检查前如何确认准备要求",
+      "category": "examination"
+    },
+    {
+      "doc_id": "EXAM-004",
+      "path": "examinations/imaging.md",
+      "title": "CT、MRI 等影像检查的信息确认",
+      "category": "examination"
+    },
+    {
+      "doc_id": "ACCESS-001",
+      "path": "accessibility/text_communication.md",
+      "title": "听障患者的文字沟通与协助请求",
+      "category": "accessibility"
+    },
+    {
+      "doc_id": "ACCESS-002",
+      "path": "accessibility/sign_input.md",
+      "title": "手语识别使用与识别错误处理",
+      "category": "accessibility"
+    },
+    {
+      "doc_id": "ACCESS-003",
+      "path": "accessibility/consultation.md",
+      "title": "面诊表达润色与医生沟通",
+      "category": "accessibility"
+    },
+    {
+      "doc_id": "ACCESS-004",
+      "path": "accessibility/facilities.md",
+      "title": "无障碍设施与线下服务查询",
+      "category": "accessibility"
+    },
+    {
+      "doc_id": "BOUNDARY-001",
+      "path": "service_boundaries.md",
+      "title": "医院服务知识的适用范围与未知信息",
+      "category": "boundary"
+    }
+  ]
+}

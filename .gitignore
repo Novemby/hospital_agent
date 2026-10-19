@@ -5,3 +5,15 @@ __pycache__/
 *.pyc
 *.log
 start-test.txt
+data/rag/
+.rag-test-deps/
+.rag-venv/
+.env
+.env.*
+!.env.example
+!.env.rag.example
+
+.idea/
+
+.tmp_*
+render_resume_check/

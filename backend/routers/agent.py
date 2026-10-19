@@ -1,6 +1,8 @@
 import json
 import logging
 import re
+import copy
+import threading
 from datetime import datetime
 from typing import Optional
 
@@ -771,8 +773,7 @@ def _should_proceed_to_slots(session: dict, text: str) -> bool:
     return False
 
 
-@router.post("/chat")
-def registration_agent_chat(payload: schemas.RegistrationAgentChatRequest, db: Session = Depends(get_db)):
+def _registration_chat_legacy(payload: schemas.RegistrationAgentChatRequest, db: Session):
     patient = crud.get_patient_by_id(db, payload.patient_id)
     if not patient:
         raise HTTPException(status_code=404, detail="患者不存在")
@@ -849,7 +850,7 @@ def registration_agent_chat(payload: schemas.RegistrationAgentChatRequest, db: S
     _log_agent_stage("post_merge", session, text)
 
     lower_text = text.lower()
-    is_confirm = bool(decision.get("confirm")) or ("确认" in text or lower_text in ["ok", "yes", "y"])
+    is_confirm = raw_text.strip().rstrip("。！!").lower() in {"确认", "确认挂号", "确定挂号", "ok", "yes", "y"}
 
     # 4. 判断流程走向
     allow_query_slots = _should_proceed_to_slots(session, text)
@@ -951,6 +952,62 @@ def registration_agent_chat(payload: schemas.RegistrationAgentChatRequest, db: S
 
     session["state"] = "FAILED"
     return helpers.make_agent_response("抱歉，流程出现异常，请重新开始。", session, [], [], "restart")
+
+
+_workflow_locks = {}
+_workflow_locks_guard = threading.Lock()
+
+
+@router.post("/chat")
+def registration_agent_chat(payload: schemas.RegistrationAgentChatRequest, db: Session = Depends(get_db)):
+    if not payload.message.strip() or len(payload.message) > 2000 or not payload.session_id or len(payload.session_id) > 128:
+        raise HTTPException(status_code=422, detail="请提供有效会话及 1–2000 字的问题")
+    if not crud.get_patient_by_id(db, payload.patient_id):
+        raise HTTPException(status_code=404, detail="患者不存在")
+    try:
+        from backend.services.hospital_workflow import run_workflow
+    except ImportError:
+        raise HTTPException(status_code=503, detail="请安装 requirements-workflow.txt 中的 LangGraph 依赖") from None
+    with _workflow_locks_guard:
+        lock = _workflow_locks.setdefault(payload.session_id, threading.RLock())
+    with lock:
+        session = helpers.get_or_create_agent_session(payload.session_id, payload.patient_id)
+        if session["patient_id"] != payload.patient_id:
+            raise HTTPException(status_code=400, detail="session_id 与 patient_id 不匹配")
+        cache = session.setdefault("workflow_requests", {})
+        if payload.request_id and payload.request_id in cache:
+            stored = cache[payload.request_id]
+            if stored["message"] != payload.message:
+                raise HTTPException(status_code=409, detail="request_id 已用于不同问题")
+            return copy.deepcopy(stored["response"])
+
+        def registration(message):
+            request = payload.model_copy(update={"message": message})
+            return _registration_chat_legacy(request, db)
+
+        def knowledge(question):
+            try:
+                from backend.services.rag.answers import RAGAnswerService
+                return RAGAnswerService.from_env().answer(question)
+            except (ImportError, ValueError, OSError, KeyError):
+                return {"status": "retrieval_unavailable", "answer": "知识服务暂不可用，可以选择继续挂号。", "sources": []}
+
+        def business_query(message, slots):
+            if "排队" in message:
+                return "当前编排尚未接入排队进度查询，请在就诊记录或向工作人员核实。"
+            department = helpers.detect_department(message) or slots.get("department")
+            date = helpers.detect_date(message) or slots.get("date")
+            if not department or not date:
+                return "查询号源需要科室和日期，请完整说明，例如“明天耳鼻喉科还剩几个号”。"
+            _, available = crud.get_slots(db, department, date)
+            return f"{department} {date} 当前号源：" + "；".join(f"{s['period']}剩余{s['remain']}个" for s in available) + "。查询不代表已挂号。"
+
+        result = run_workflow(payload.message, session, registration, knowledge, business_query)
+        if payload.request_id:
+            cache[payload.request_id] = {"message": payload.message, "response": copy.deepcopy(result)}
+            while len(cache) > 20:
+                del cache[next(iter(cache))]
+        return result
 
 
 # ===========================================================================

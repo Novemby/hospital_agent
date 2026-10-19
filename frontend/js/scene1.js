@@ -39,6 +39,8 @@ const app = createApp({
         const agentState = ref('INIT');
         const agentOptions = ref([]);
         const agentLoading = ref(false);
+        const agentKnowledgeSources = ref([]);
+        const agentKnowledgeNotice = ref('');
 
         // 连续识别状态
         const continuousActive = ref(false);
@@ -402,9 +404,11 @@ const app = createApp({
 
         const sendToAgent = async (text) => {
             const content = (text || '').trim();
-            if (!content || !currentId.value) return;
+            if (!content || !currentId.value || agentLoading.value) return;
 
             agentMessages.value.push({ role: 'user', content });
+            agentKnowledgeSources.value = [];
+            agentKnowledgeNotice.value = '';
             agentLoading.value = true;
             assistantPhase.value = 'THINKING';
 
@@ -416,6 +420,7 @@ const app = createApp({
                         session_id: sessionId.value,
                         patient_id: parseInt(currentId.value),
                         message: content,
+                        request_id: crypto.randomUUID(),
                     }),
                 });
 
@@ -423,11 +428,13 @@ const app = createApp({
                 if (!response.ok) throw new Error(data.detail || 'Agent 请求失败');
 
                 agentReply.value = data.reply || '收到。';
+                agentKnowledgeSources.value = Array.isArray(data.sources) ? data.sources : [];
+                agentKnowledgeNotice.value = data.scope_notice || '';
                 agentOptions.value = Array.isArray(data.options) ? data.options : [];
                 agentState.value = data.state || agentState.value;
                 agentMessages.value.push({ role: 'assistant', content: agentReply.value });
                 assistantDisplayText.value = agentReply.value;
-                assistantPhase.value = data.state === 'SUCCESS' ? 'SUCCESS' : 'REPLY';
+                assistantPhase.value = data.next_action === 'go_waiting' ? 'SUCCESS' : 'REPLY';
 
                 // 🌟 解析并渲染后端传来的结构化症状
                 if (data?.slots?.triage_symptoms) {
@@ -448,7 +455,7 @@ const app = createApp({
 
                 scrollToBottom();
 
-                if (data.state === 'SUCCESS') {
+                if (data.next_action === 'go_waiting') {
                     // 等待渲染完成后再提示成功
                     setTimeout(() => {
                         alert(data.reply || '挂号成功');
@@ -715,6 +722,7 @@ const app = createApp({
         return {
             view, currentId, idCardInput, currentPatientName, vueWordSequence,
             showChat, isRecordingVoice, voiceText, recognizedText, chatMessages, chatContainer,
+            agentKnowledgeSources, agentKnowledgeNotice,
             sessionId, agentReply, agentInputText, streamText, triageResult, parsedSymptoms,
             agentMessages, agentState, agentOptions, agentLoading,
             showAppointmentModal, appointmentStep, departmentOptions, selectedDepartment, selectedDate,
@@ -963,6 +971,12 @@ const app = createApp({
                                         <div v-else-if="assistantPhase === 'REPLY'" class="space-y-3 w-full">
                                             <div class="text-4xl">🤖</div>
                                             <div class="text-base text-gray-800 leading-relaxed bg-white rounded-2xl p-4 shadow-sm border border-orange-100 text-left">"{{ assistantDisplayText }}"</div>
+                                            <p v-if="agentKnowledgeNotice" class="text-sm text-amber-800">{{ agentKnowledgeNotice }}</p>
+                                            <details v-for="(source, i) in agentKnowledgeSources" :key="i" class="text-left text-sm bg-white rounded-xl p-3 border">
+                                                <summary class="cursor-pointer text-green-700">[{{ source.source_id }}] {{ source.title }}</summary>
+                                                <p class="text-xs text-gray-500 mt-2">{{ source.doc_id }} · {{ source.section }}</p>
+                                                <blockquote class="whitespace-pre-wrap mt-2">{{ source.quote }}</blockquote>
+                                            </details>
                                             <!-- 选项按钮 -->
                                             <div class="flex flex-wrap gap-2 justify-center mt-2" v-if="agentOptions && agentOptions.length && agentState !== 'SUCCESS'">
                                                 <button v-for="(op, idx) in agentOptions" :key="idx" @click="clickOption(op)" class="px-4 py-1.5 rounded-full border border-blue-300 text-blue-700 bg-white hover:bg-blue-50 text-sm shadow-sm">
